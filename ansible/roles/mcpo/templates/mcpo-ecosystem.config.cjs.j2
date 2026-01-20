@@ -2,13 +2,7 @@ module.exports = {
   apps: [{
     name: '{{ mcpo_service_name }}',
     script: '{{ ai_hub_base_path }}/venvs/mcpo/bin/mcpo',
-    args: [
-      '--port', '{{ mcpo_port }}',
-      '--api-key', '{{ mcpo_api_key }}',
-      '--',
-      'node',
-      '{{ mcp_memory_server_path }}'
-    ].join(' '),
+    args: '--port {{ mcpo_port }} --api-key {{ mcpo_api_key }} -- node {{ mcp_memory_server_path }}',
     cwd: '{{ ai_hub_base_path }}',
     env: {
       OPENAI_API_KEY: '{{ openai_api_key }}',
