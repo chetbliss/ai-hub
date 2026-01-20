@@ -1,0 +1,1891 @@
+#!/usr/bin/env node
+
+/**
+ * AI Hub Memory MCP Server v2.0 - Phase 3b Complete
+ *
+ * Provides tools for:
+ * - Knowledge Base (semantic search via Qdrant + OpenAI embeddings)
+ * - Personal Memory (todos, reminders, notes)
+ * - Security+ Quiz Mode (adaptive learning, spaced repetition)
+ * - Code Snippet Library (version tracking, usage analytics)
+ * - Troubleshooting Journal (solution history, issue linking)
+ * - News Aggregator (Phase 3c - coming next)
+ */
+
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  Tool,
+} from '@modelcontextprotocol/sdk/types.js';
+import Database from 'better-sqlite3';
+import { QdrantClient } from '@qdrant/js-client-rest';
+import OpenAI from 'openai';
+import { config } from 'dotenv';
+import crypto from 'crypto';
+import Parser from 'rss-parser';
+
+// Load environment variables
+config();
+
+// Initialize clients
+const db = new Database(process.env.SQLITE_DB_PATH || '{{ sqlite_db_path }}');
+const qdrant = new QdrantClient({ url: process.env.QDRANT_URL || '{{ qdrant_url }}' });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const rssParser = new Parser();
+
+// Configuration constants
+const EMBEDDING_MODEL = '{{ embedding_model }}';
+const EMBEDDING_DIMENSIONS = {{ embedding_dimensions }};
+const QDRANT_COLLECTION = '{{ qdrant_collection }}';
+const CHUNK_SIZE = 1000;
+const CHUNK_OVERLAP = 200;
+
+// Server instance
+const server = new Server(
+  {
+    name: 'mcp-memory',
+    version: '2.0.0-phase3c',
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
+  }
+);
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Generate embedding for text using OpenAI
+ */
+async function generateEmbedding(text: string): Promise<number[]> {
+  const response = await openai.embeddings.create({
+    model: EMBEDDING_MODEL,
+    input: text,
+  });
+  return response.data[0].embedding;
+}
+
+/**
+ * Chunk text into overlapping segments
+ */
+function chunkText(text: string, metadata: any = {}): Array<{ text: string; metadata: any }> {
+  const chunks: Array<{ text: string; metadata: any }> = [];
+  let start = 0;
+  let chunkNum = 0;
+
+  while (start < text.length) {
+    const end = Math.min(start + CHUNK_SIZE, text.length);
+    const chunkText = text.slice(start, end);
+
+    // Don't create tiny chunks at the end
+    if (chunkText.length < 100 && chunks.length > 0) {
+      chunks[chunks.length - 1].text += ' ' + chunkText;
+      break;
+    }
+
+    chunks.push({
+      text: chunkText,
+      metadata: {
+        ...metadata,
+        chunk_num: chunkNum,
+        chunk_id: `${metadata.title || 'unknown'}:chunk${chunkNum}`,
+      },
+    });
+
+    chunkNum++;
+    start = end - CHUNK_OVERLAP;
+  }
+
+  return chunks;
+}
+
+/**
+ * Generate unique point ID from string
+ */
+function generatePointId(str: string): number {
+  const hash = crypto.createHash('md5').update(str).digest('hex');
+  return parseInt(hash.substring(0, 16), 16) % (2 ** 63);
+}
+
+/**
+ * Format search results for display
+ */
+function formatSearchResults(results: any[]): string {
+  if (results.length === 0) {
+    return 'No relevant documents found.';
+  }
+
+  let output = `Found ${results.length} relevant ${results.length === 1 ? 'document' : 'documents'}:\n\n`;
+
+  results.forEach((result, index) => {
+    const score = (result.score * 100).toFixed(1);
+    const payload = result.payload;
+
+    output += `## Result ${index + 1} (${score}% match)\n`;
+    output += `**Source:** ${payload.file_path || payload.title || 'Unknown'}\n`;
+    if (payload.category) output += `**Category:** ${payload.category}\n`;
+    output += `\n${payload.text}\n`;
+    output += `\n---\n\n`;
+  });
+
+  return output;
+}
+
+// ============================================================================
+// TOOL DEFINITIONS
+// ============================================================================
+
+const TOOLS: Tool[] = [
+  // Knowledge Base Tools
+  {
+    name: 'search_knowledge',
+    description: 'Semantic search across homelab documentation and knowledge base. Use this to find information about how things were configured, where services are running, or any technical documentation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query (e.g., "how did we setup proxmox exporter", "where is pihole running")' },
+        limit: { type: 'number', description: 'Maximum number of results to return', default: 5 },
+        score_threshold: { type: 'number', description: 'Minimum similarity score (0-1)', default: 0.7 }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'add_knowledge',
+    description: 'Add new document or note to knowledge base with semantic indexing',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Document title' },
+        content: { type: 'string', description: 'Document content (markdown supported)' },
+        category: { type: 'string', description: 'Category (e.g., homelab, proxmox, networking)' },
+        tags: { type: 'string', description: 'Comma-separated tags' }
+      },
+      required: ['title', 'content']
+    }
+  },
+
+  // Personal Memory Tools
+  {
+    name: 'add_todo',
+    description: 'Add a new todo item to track tasks',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'Todo description' },
+        category: { type: 'string', description: 'Category (e.g., homelab, personal, work, learning)' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Priority level' },
+        due_date: { type: 'string', description: 'Due date (ISO 8601 format or natural language)' }
+      },
+      required: ['description']
+    }
+  },
+  {
+    name: 'list_todos',
+    description: 'List todos with optional filters',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'Filter by status' },
+        category: { type: 'string', description: 'Filter by category' }
+      }
+    }
+  },
+  {
+    name: 'update_todo',
+    description: 'Update todo status or details',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Todo ID' },
+        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'New status' },
+        description: { type: 'string', description: 'Updated description' }
+      },
+      required: ['id']
+    }
+  },
+
+  // Reminder Tools
+  {
+    name: 'add_reminder',
+    description: 'Set a reminder for a specific time',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'What to be reminded about' },
+        remind_at: { type: 'string', description: 'When to remind (ISO 8601 or natural language)' },
+        category: { type: 'string', description: 'Category' }
+      },
+      required: ['description', 'remind_at']
+    }
+  },
+  {
+    name: 'list_reminders',
+    description: 'List upcoming reminders',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['pending', 'sent', 'cancelled'], description: 'Filter by status' }
+      }
+    }
+  },
+
+  // Security+ Quiz Tools
+  {
+    name: 'quiz_start',
+    description: 'Start a Security+ quiz session with adaptive learning',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['random', 'domain_specific', 'weak_areas'],
+          description: 'Quiz mode: random (all domains), domain_specific (focus on one), weak_areas (adaptive based on past performance)',
+          default: 'random'
+        },
+        domain: { type: 'string', description: 'Specific domain when mode is domain_specific (e.g., "Threats, Vulnerabilities & Mitigations")' },
+        question_count: { type: 'number', description: 'Number of questions in this session', default: 10 }
+      }
+    }
+  },
+  {
+    name: 'quiz_next_question',
+    description: 'Get the next question in the current quiz session',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'number', description: 'Active quiz session ID' }
+      },
+      required: ['session_id']
+    }
+  },
+  {
+    name: 'quiz_submit_answer',
+    description: 'Submit answer to quiz question and get immediate feedback',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'number', description: 'Quiz session ID' },
+        question_id: { type: 'number', description: 'Question ID' },
+        answer: { type: 'string', enum: ['A', 'B', 'C', 'D'], description: 'Selected answer' }
+      },
+      required: ['session_id', 'question_id', 'answer']
+    }
+  },
+  {
+    name: 'quiz_get_stats',
+    description: 'Get performance statistics and identify weak areas',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        domain: { type: 'string', description: 'Filter stats by specific domain (optional)' }
+      }
+    }
+  },
+  {
+    name: 'quiz_add_question',
+    description: 'Add a custom Security+ question to the database',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        domain: { type: 'string', description: 'CompTIA Security+ domain' },
+        subdomain: { type: 'string', description: 'Subdomain or topic' },
+        question: { type: 'string', description: 'Question text' },
+        option_a: { type: 'string', description: 'Option A' },
+        option_b: { type: 'string', description: 'Option B' },
+        option_c: { type: 'string', description: 'Option C' },
+        option_d: { type: 'string', description: 'Option D' },
+        correct_answer: { type: 'string', enum: ['A', 'B', 'C', 'D'], description: 'Correct answer' },
+        explanation: { type: 'string', description: 'Explanation of correct answer' },
+        difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'], description: 'Difficulty level', default: 'medium' }
+      },
+      required: ['domain', 'question', 'option_a', 'option_b', 'option_c', 'option_d', 'correct_answer']
+    }
+  },
+  {
+    name: 'quiz_end_session',
+    description: 'End quiz session and get final results',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'number', description: 'Quiz session ID' }
+      },
+      required: ['session_id']
+    }
+  },
+
+  // Code Snippet Library Tools
+  {
+    name: 'snippet_add',
+    description: 'Save a code snippet with automatic version tracking',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Snippet title/name' },
+        description: { type: 'string', description: 'What this snippet does' },
+        language: { type: 'string', description: 'Programming language (e.g., bash, python, javascript, sql)' },
+        code: { type: 'string', description: 'The actual code' },
+        tags: { type: 'string', description: 'Comma-separated tags' },
+        category: { type: 'string', description: 'Category (e.g., docker, proxmox, networking, backup)' }
+      },
+      required: ['title', 'language', 'code']
+    }
+  },
+  {
+    name: 'snippet_search',
+    description: 'Search for code snippets by keyword, language, or tag',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query (searches title, description, tags)' },
+        language: { type: 'string', description: 'Filter by programming language' },
+        category: { type: 'string', description: 'Filter by category' },
+        limit: { type: 'number', description: 'Maximum results', default: 10 }
+      }
+    }
+  },
+  {
+    name: 'snippet_get',
+    description: 'Retrieve full code snippet by ID',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Snippet ID' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'snippet_update',
+    description: 'Update snippet code (automatically creates new version)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Snippet ID' },
+        code: { type: 'string', description: 'Updated code' },
+        change_description: { type: 'string', description: 'What changed in this version' }
+      },
+      required: ['id', 'code']
+    }
+  },
+  {
+    name: 'snippet_get_versions',
+    description: 'View version history for a snippet',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Snippet ID' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'snippet_track_usage',
+    description: 'Record when you use a snippet (updates usage count and last used date)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Snippet ID' },
+        context: { type: 'string', description: 'Where/how you used it (optional)' }
+      },
+      required: ['id']
+    }
+  },
+
+  // Troubleshooting Journal Tools
+  {
+    name: 'issue_log',
+    description: 'Log a new troubleshooting issue or problem',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Issue title/summary' },
+        description: { type: 'string', description: 'Detailed description of the problem' },
+        system: { type: 'string', description: 'Affected system (e.g., proxmox, docker, pihole, network)' },
+        category: { type: 'string', description: 'Issue category (e.g., networking, storage, performance, security)' },
+        severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Issue severity' },
+        error_message: { type: 'string', description: 'Exact error message if any' },
+        stack_trace: { type: 'string', description: 'Stack trace or detailed logs' }
+      },
+      required: ['title', 'description']
+    }
+  },
+  {
+    name: 'issue_add_solution',
+    description: 'Document the solution to an issue',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        issue_id: { type: 'number', description: 'Issue ID' },
+        solution: { type: 'string', description: 'The solution that worked' },
+        steps: { type: 'string', description: 'Step-by-step instructions' },
+        worked: { type: 'number', enum: [0, 1], description: '1 if solution worked, 0 if tried but did not work', default: 1 },
+        time_to_resolve: { type: 'string', description: 'How long it took to resolve (e.g., "2 hours", "30 minutes")' },
+        notes: { type: 'string', description: 'Additional notes or lessons learned' }
+      },
+      required: ['issue_id', 'solution']
+    }
+  },
+  {
+    name: 'issue_search',
+    description: 'Search for similar past issues to find solutions',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query (error message, symptoms, keywords)' },
+        system: { type: 'string', description: 'Filter by system' },
+        status: { type: 'string', enum: ['open', 'investigating', 'resolved', 'closed'], description: 'Filter by status' },
+        limit: { type: 'number', description: 'Maximum results', default: 10 }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'issue_link_related',
+    description: 'Link two related issues together',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        issue_id: { type: 'number', description: 'Current issue ID' },
+        related_issue_id: { type: 'number', description: 'Related issue ID' },
+        relationship_type: { type: 'string', enum: ['duplicate', 'similar', 'related', 'caused_by'], description: 'Type of relationship' }
+      },
+      required: ['issue_id', 'related_issue_id', 'relationship_type']
+    }
+  },
+  {
+    name: 'issue_vote_solution',
+    description: 'Vote on whether a solution was helpful',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        solution_id: { type: 'number', description: 'Solution ID' },
+        vote_type: { type: 'string', enum: ['up', 'down'], description: 'Upvote or downvote' }
+      },
+      required: ['solution_id', 'vote_type']
+    }
+  },
+  {
+    name: 'issue_get_history',
+    description: 'Get complete timeline and all solutions for an issue',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        issue_id: { type: 'number', description: 'Issue ID' }
+      },
+      required: ['issue_id']
+    }
+  },
+
+  // News Aggregator Tools
+  {
+    name: 'news_add_feed',
+    description: 'Add RSS feed to monitor for security news and homelab updates',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Feed name (e.g., "BleepingComputer Security")' },
+        url: { type: 'string', description: 'RSS feed URL' },
+        category: { type: 'string', description: 'Category (security, homelab, technology)' },
+        fetch_interval: { type: 'number', description: 'Fetch interval in minutes (default 120)', default: 120 }
+      },
+      required: ['name', 'url']
+    }
+  },
+  {
+    name: 'news_remove_feed',
+    description: 'Remove RSS feed from monitoring',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        feed_id: { type: 'number', description: 'Feed ID to remove' }
+      },
+      required: ['feed_id']
+    }
+  },
+  {
+    name: 'news_list_feeds',
+    description: 'List all configured RSS feeds',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', description: 'Filter by category (optional)' },
+        active_only: { type: 'number', enum: [0, 1], description: 'Show only active feeds (1) or all feeds (0)', default: 1 }
+      }
+    }
+  },
+  {
+    name: 'news_add_keyword',
+    description: 'Add keyword to track with optional alerts',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        feed_id: { type: 'number', description: 'Feed ID to track keyword in (optional - tracks across all if omitted)' },
+        keyword: { type: 'string', description: 'Keyword to track (e.g., "CVE", "proxmox", "docker")' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Keyword priority', default: 'medium' },
+        alert_enabled: { type: 'number', enum: [0, 1], description: 'Enable proactive alerts (1=yes, 0=no)', default: 0 }
+      },
+      required: ['keyword']
+    }
+  },
+  {
+    name: 'news_fetch_now',
+    description: 'Manually trigger RSS feed fetch for a specific feed or all feeds',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        feed_id: { type: 'number', description: 'Specific feed ID (optional - fetches all if omitted)' }
+      }
+    }
+  },
+  {
+    name: 'news_list_articles',
+    description: 'List recent news articles with optional filters',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        feed_id: { type: 'number', description: 'Filter by feed ID' },
+        keyword: { type: 'string', description: 'Filter by keyword match' },
+        limit: { type: 'number', description: 'Maximum results', default: 20 },
+        min_relevance: { type: 'number', description: 'Minimum relevance score (0-1)', default: 0 }
+      }
+    }
+  },
+  {
+    name: 'news_get_summary',
+    description: 'Get AI-generated summary of an article',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        article_id: { type: 'number', description: 'Article ID' }
+      },
+      required: ['article_id']
+    }
+  },
+  {
+    name: 'news_save_article',
+    description: 'Bookmark an article for later reference',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        article_id: { type: 'number', description: 'Article ID' },
+        notes: { type: 'string', description: 'Personal notes about the article' }
+      },
+      required: ['article_id']
+    }
+  },
+  {
+    name: 'news_get_trending',
+    description: 'Get trending topics across all feeds',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', description: 'Filter by feed category' },
+        days: { type: 'number', description: 'Look back N days', default: 7 }
+      }
+    }
+  }
+];
+
+// ============================================================================
+// REQUEST HANDLERS
+// ============================================================================
+
+// List tools handler
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return { tools: TOOLS };
+});
+
+// Call tool handler
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+
+  try {
+    switch (name) {
+      // ====================================================================
+      // KNOWLEDGE BASE TOOLS
+      // ====================================================================
+
+      case 'search_knowledge': {
+        const limit = args.limit || 5;
+        const scoreThreshold = args.score_threshold || 0.7;
+
+        // Generate embedding for search query
+        const queryEmbedding = await generateEmbedding(args.query as string);
+
+        // Search Qdrant
+        const searchResults = await qdrant.search(QDRANT_COLLECTION, {
+          vector: queryEmbedding,
+          limit: limit as number,
+          score_threshold: scoreThreshold as number,
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: formatSearchResults(searchResults)
+          }]
+        };
+      }
+
+      case 'add_knowledge': {
+        const { title, content, category, tags } = args;
+
+        // Chunk the content
+        const chunks = chunkText(content as string, { title, category, tags, source: 'user_added' });
+
+        // Process each chunk
+        const points = [];
+        for (const chunk of chunks) {
+          // Generate embedding
+          const embedding = await generateEmbedding(chunk.text);
+
+          // Create point ID
+          const pointId = generatePointId(chunk.metadata.chunk_id);
+
+          points.push({
+            id: pointId,
+            vector: embedding,
+            payload: {
+              text: chunk.text,
+              title: title,
+              category: category || null,
+              tags: tags || null,
+              chunk_num: chunk.metadata.chunk_num,
+              chunk_id: chunk.metadata.chunk_id,
+              source: 'user_added',
+              created_at: new Date().toISOString(),
+            },
+          });
+        }
+
+        // Upsert to Qdrant
+        await qdrant.upsert(QDRANT_COLLECTION, {
+          points: points,
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Added "${title}" to knowledge base (${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'})`
+          }]
+        };
+      }
+
+      // ====================================================================
+      // PERSONAL MEMORY TOOLS (unchanged from Phase 2)
+      // ====================================================================
+
+      case 'add_todo': {
+        const stmt = db.prepare(
+          'INSERT INTO todos (description, category, priority, due_date) VALUES (?, ?, ?, ?)'
+        );
+        const result = stmt.run(
+          args.description,
+          args.category || null,
+          args.priority || 'medium',
+          args.due_date || null
+        );
+        return {
+          content: [{
+            type: 'text',
+            text: `Todo added with ID: ${result.lastInsertRowid}`
+          }]
+        };
+      }
+
+      case 'list_todos': {
+        let query = 'SELECT * FROM todos WHERE 1=1';
+        const params: any[] = [];
+
+        if (args.status) {
+          query += ' AND status = ?';
+          params.push(args.status);
+        }
+        if (args.category) {
+          query += ' AND category = ?';
+          params.push(args.category);
+        }
+
+        query += ' ORDER BY created_at DESC';
+        const todos = db.prepare(query).all(...params);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(todos, null, 2)
+          }]
+        };
+      }
+
+      case 'update_todo': {
+        const updates: string[] = [];
+        const params: any[] = [];
+
+        if (args.status) {
+          updates.push('status = ?');
+          params.push(args.status);
+          if (args.status === 'completed') {
+            updates.push('completed_at = datetime("now")');
+          }
+        }
+        if (args.description) {
+          updates.push('description = ?');
+          params.push(args.description);
+        }
+
+        updates.push('updated_at = datetime("now")');
+        params.push(args.id);
+
+        const query = `UPDATE todos SET ${updates.join(', ')} WHERE id = ?`;
+        const result = db.prepare(query).run(...params);
+
+        return {
+          content: [{
+            type: 'text',
+            text: result.changes > 0 ? 'Todo updated successfully' : 'Todo not found'
+          }]
+        };
+      }
+
+      case 'add_reminder': {
+        const stmt = db.prepare(
+          'INSERT INTO reminders (description, category, remind_at) VALUES (?, ?, ?)'
+        );
+        const result = stmt.run(args.description, args.category || null, args.remind_at);
+        return {
+          content: [{
+            type: 'text',
+            text: `Reminder set for ${args.remind_at} with ID: ${result.lastInsertRowid}`
+          }]
+        };
+      }
+
+      case 'list_reminders': {
+        let query = 'SELECT * FROM reminders WHERE 1=1';
+        const params: any[] = [];
+
+        if (args.status) {
+          query += ' AND status = ?';
+          params.push(args.status);
+        }
+
+        query += ' ORDER BY remind_at ASC';
+        const reminders = db.prepare(query).all(...params);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(reminders, null, 2)
+          }]
+        };
+      }
+
+      // ====================================================================
+      // SECURITY+ QUIZ TOOLS
+      // ====================================================================
+
+      case 'quiz_start': {
+        const mode = args.mode || 'random';
+        const questionCount = args.question_count || 10;
+
+        // Create quiz session
+        const sessionStmt = db.prepare(
+          'INSERT INTO quiz_sessions (session_type, questions_count) VALUES (?, ?)'
+        );
+        const sessionResult = sessionStmt.run(mode, questionCount);
+        const sessionId = sessionResult.lastInsertRowid;
+
+        // Get session details
+        const session = db.prepare('SELECT * FROM quiz_sessions WHERE id = ?').get(sessionId);
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Quiz session started!\n\n` +
+                  `Session ID: ${sessionId}\n` +
+                  `Mode: ${mode}\n` +
+                  `Questions: ${questionCount}\n\n` +
+                  `Use quiz_next_question with session_id: ${sessionId} to get your first question.`
+          }]
+        };
+      }
+
+      case 'quiz_next_question': {
+        const sessionId = args.session_id;
+
+        // Get session info
+        const session: any = db.prepare('SELECT * FROM quiz_sessions WHERE id = ?').get(sessionId);
+        if (!session) {
+          return {
+            content: [{ type: 'text', text: 'Session not found' }],
+            isError: true
+          };
+        }
+
+        // Count questions already answered in this session
+        const answeredCount: any = db.prepare(
+          'SELECT COUNT(*) as count FROM quiz_performance WHERE session_id = ?'
+        ).get(sessionId);
+
+        if (answeredCount.count >= session.questions_count) {
+          return {
+            content: [{
+              type: 'text',
+              text: `Quiz session complete! You've answered all ${session.questions_count} questions.\n\n` +
+                    `Use quiz_end_session with session_id: ${sessionId} to see your final results.`
+            }]
+          };
+        }
+
+        // Get already answered question IDs
+        const answeredIds = db.prepare(
+          'SELECT question_id FROM quiz_performance WHERE session_id = ?'
+        ).all(sessionId).map((row: any) => row.question_id);
+
+        // Select next question based on mode
+        let question: any;
+        if (session.session_type === 'weak_areas') {
+          // Find questions from domains where performance is poor
+          question = db.prepare(`
+            SELECT q.* FROM quiz_questions q
+            LEFT JOIN (
+              SELECT question_id, AVG(is_correct) as avg_correct
+              FROM quiz_performance
+              GROUP BY question_id
+            ) perf ON q.id = perf.question_id
+            WHERE q.id NOT IN (${answeredIds.length > 0 ? answeredIds.join(',') : '0'})
+            ORDER BY COALESCE(perf.avg_correct, 0.5) ASC, RANDOM()
+            LIMIT 1
+          `).get();
+        } else if (session.session_type === 'domain_specific' && args.domain) {
+          question = db.prepare(`
+            SELECT * FROM quiz_questions
+            WHERE domain = ? AND id NOT IN (${answeredIds.length > 0 ? answeredIds.join(',') : '0'})
+            ORDER BY RANDOM()
+            LIMIT 1
+          `).get(args.domain);
+        } else {
+          // Random mode
+          question = db.prepare(`
+            SELECT * FROM quiz_questions
+            WHERE id NOT IN (${answeredIds.length > 0 ? answeredIds.join(',') : '0'})
+            ORDER BY RANDOM()
+            LIMIT 1
+          `).get();
+        }
+
+        if (!question) {
+          return {
+            content: [{ type: 'text', text: 'No more questions available for this mode' }],
+            isError: true
+          };
+        }
+
+        const questionNum = answeredCount.count + 1;
+
+        return {
+          content: [{
+            type: 'text',
+            text: `**Question ${questionNum} of ${session.questions_count}**\n\n` +
+                  `**Domain:** ${question.domain}${question.subdomain ? ` > ${question.subdomain}` : ''}\n` +
+                  `**Difficulty:** ${question.difficulty}\n\n` +
+                  `${question.question}\n\n` +
+                  `A) ${question.option_a}\n` +
+                  `B) ${question.option_b}\n` +
+                  `C) ${question.option_c}\n` +
+                  `D) ${question.option_d}\n\n` +
+                  `Submit your answer using quiz_submit_answer with:\n` +
+                  `- session_id: ${sessionId}\n` +
+                  `- question_id: ${question.id}\n` +
+                  `- answer: A, B, C, or D`
+          }]
+        };
+      }
+
+      case 'quiz_submit_answer': {
+        const { session_id, question_id, answer } = args;
+
+        // Get question
+        const question: any = db.prepare('SELECT * FROM quiz_questions WHERE id = ?').get(question_id);
+        if (!question) {
+          return {
+            content: [{ type: 'text', text: 'Question not found' }],
+            isError: true
+          };
+        }
+
+        // Check if correct
+        const isCorrect = answer === question.correct_answer;
+
+        // Record performance
+        db.prepare(
+          'INSERT INTO quiz_performance (session_id, question_id, user_answer, is_correct) VALUES (?, ?, ?, ?)'
+        ).run(session_id, question_id, answer, isCorrect ? 1 : 0);
+
+        // Update session correct count
+        if (isCorrect) {
+          db.prepare(
+            'UPDATE quiz_sessions SET correct_count = correct_count + 1 WHERE id = ?'
+          ).run(session_id);
+        }
+
+        // Build response
+        let response = isCorrect ? '✅ **Correct!**\n\n' : '❌ **Incorrect**\n\n';
+        response += `**Your answer:** ${answer}\n`;
+        response += `**Correct answer:** ${question.correct_answer}\n\n`;
+
+        if (question.explanation) {
+          response += `**Explanation:** ${question.explanation}\n\n`;
+        }
+
+        // Show which option was correct
+        const correctOption = question[`option_${question.correct_answer.toLowerCase()}`];
+        response += `The correct answer is "${correctOption}"\n\n`;
+
+        response += `Use quiz_next_question with session_id: ${session_id} to continue.`;
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      case 'quiz_get_stats': {
+        const domainFilter = args.domain;
+
+        // Overall stats
+        const overallStats: any = db.prepare(`
+          SELECT
+            COUNT(*) as total_questions,
+            SUM(is_correct) as correct,
+            ROUND(AVG(is_correct) * 100, 1) as percentage
+          FROM quiz_performance
+        `).get();
+
+        let response = '# Security+ Quiz Statistics\n\n';
+        response += `**Overall Performance:**\n`;
+        response += `- Questions answered: ${overallStats.total_questions || 0}\n`;
+        response += `- Correct: ${overallStats.correct || 0}\n`;
+        response += `- Accuracy: ${overallStats.percentage || 0}%\n\n`;
+
+        // Stats by domain
+        const domainStats = db.prepare(`
+          SELECT
+            q.domain,
+            COUNT(*) as total,
+            SUM(qp.is_correct) as correct,
+            ROUND(AVG(qp.is_correct) * 100, 1) as percentage
+          FROM quiz_performance qp
+          JOIN quiz_questions q ON qp.question_id = q.id
+          ${domainFilter ? 'WHERE q.domain = ?' : ''}
+          GROUP BY q.domain
+          ORDER BY percentage ASC
+        `).all(domainFilter || undefined);
+
+        if (domainStats.length > 0) {
+          response += `**Performance by Domain:**\n`;
+          domainStats.forEach((stat: any) => {
+            response += `\n- **${stat.domain}**\n`;
+            response += `  - ${stat.correct}/${stat.total} correct (${stat.percentage}%)\n`;
+          });
+
+          response += `\n**Weak Areas (Focus here):**\n`;
+          const weakDomains = domainStats.filter((stat: any) => stat.percentage < 70);
+          if (weakDomains.length > 0) {
+            weakDomains.forEach((stat: any) => {
+              response += `- ${stat.domain} (${stat.percentage}%)\n`;
+            });
+          } else {
+            response += `Great job! All domains above 70%\n`;
+          }
+        }
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      case 'quiz_add_question': {
+        const stmt = db.prepare(`
+          INSERT INTO quiz_questions (
+            domain, subdomain, question,
+            option_a, option_b, option_c, option_d,
+            correct_answer, explanation, difficulty
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        const result = stmt.run(
+          args.domain,
+          args.subdomain || null,
+          args.question,
+          args.option_a,
+          args.option_b,
+          args.option_c,
+          args.option_d,
+          args.correct_answer,
+          args.explanation || null,
+          args.difficulty || 'medium'
+        );
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Question added to database with ID: ${result.lastInsertRowid}`
+          }]
+        };
+      }
+
+      case 'quiz_end_session': {
+        const sessionId = args.session_id;
+
+        // Mark session as completed
+        db.prepare('UPDATE quiz_sessions SET completed_at = datetime("now") WHERE id = ?').run(sessionId);
+
+        // Get final results
+        const session: any = db.prepare('SELECT * FROM quiz_sessions WHERE id = ?').get(sessionId);
+        const performance = db.prepare(`
+          SELECT
+            q.domain,
+            COUNT(*) as total,
+            SUM(qp.is_correct) as correct
+          FROM quiz_performance qp
+          JOIN quiz_questions q ON qp.question_id = q.id
+          WHERE qp.session_id = ?
+          GROUP BY q.domain
+        `).all(sessionId);
+
+        const percentage = session.questions_count > 0
+          ? ((session.correct_count / session.questions_count) * 100).toFixed(1)
+          : '0';
+
+        let response = `# Quiz Session ${sessionId} Complete!\n\n`;
+        response += `**Final Score:** ${session.correct_count}/${session.questions_count} (${percentage}%)\n\n`;
+
+        if (performance.length > 0) {
+          response += `**Performance by Domain:**\n`;
+          performance.forEach((perf: any) => {
+            const domainPct = ((perf.correct / perf.total) * 100).toFixed(1);
+            response += `- ${perf.domain}: ${perf.correct}/${perf.total} (${domainPct}%)\n`;
+          });
+        }
+
+        response += `\n`;
+        if (parseFloat(percentage) >= 80) {
+          response += `🎉 Excellent work! You're ready for this material!\n`;
+        } else if (parseFloat(percentage) >= 70) {
+          response += `✅ Good job! A bit more practice and you'll master this.\n`;
+        } else {
+          response += `📚 Keep studying! Use quiz_get_stats to see weak areas.\n`;
+        }
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      // ====================================================================
+      // CODE SNIPPET LIBRARY TOOLS
+      // ====================================================================
+
+      case 'snippet_add': {
+        const { title, description, language, code, tags, category } = args;
+
+        // Insert snippet
+        const stmt = db.prepare(`
+          INSERT INTO code_snippets (title, description, language, code, tags, category)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(title, description || null, language, code, tags || null, category || null);
+        const snippetId = result.lastInsertRowid;
+
+        // Create initial version
+        db.prepare(`
+          INSERT INTO snippet_versions (snippet_id, version_number, code, change_description)
+          VALUES (?, 1, ?, 'Initial version')
+        `).run(snippetId, code);
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Code snippet saved!\n\n` +
+                  `**ID:** ${snippetId}\n` +
+                  `**Title:** ${title}\n` +
+                  `**Language:** ${language}\n` +
+                  `${tags ? `**Tags:** ${tags}\n` : ''}` +
+                  `\nUse snippet_get with id: ${snippetId} to retrieve it later.`
+          }]
+        };
+      }
+
+      case 'snippet_search': {
+        const { query, language, category, limit } = args;
+        const maxResults = limit || 10;
+
+        let sql = 'SELECT * FROM code_snippets WHERE 1=1';
+        const params: any[] = [];
+
+        if (query) {
+          sql += ' AND (title LIKE ? OR description LIKE ? OR tags LIKE ?)';
+          const searchTerm = `%${query}%`;
+          params.push(searchTerm, searchTerm, searchTerm);
+        }
+
+        if (language) {
+          sql += ' AND language = ?';
+          params.push(language);
+        }
+
+        if (category) {
+          sql += ' AND category = ?';
+          params.push(category);
+        }
+
+        sql += ' ORDER BY usage_count DESC, updated_at DESC LIMIT ?';
+        params.push(maxResults);
+
+        const snippets = db.prepare(sql).all(...params);
+
+        if (snippets.length === 0) {
+          return {
+            content: [{ type: 'text', text: 'No snippets found matching your criteria.' }]
+          };
+        }
+
+        let response = `Found ${snippets.length} ${snippets.length === 1 ? 'snippet' : 'snippets'}:\n\n`;
+        snippets.forEach((snippet: any) => {
+          response += `**[${snippet.id}] ${snippet.title}**\n`;
+          response += `Language: ${snippet.language}`;
+          if (snippet.category) response += ` | Category: ${snippet.category}`;
+          if (snippet.tags) response += ` | Tags: ${snippet.tags}`;
+          response += `\n`;
+          if (snippet.description) response += `${snippet.description}\n`;
+          response += `Used ${snippet.usage_count} times`;
+          if (snippet.last_used_at) response += ` | Last used: ${snippet.last_used_at}`;
+          response += `\n\n`;
+        });
+
+        response += `Use snippet_get with the ID to see the full code.`;
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      case 'snippet_get': {
+        const snippet: any = db.prepare('SELECT * FROM code_snippets WHERE id = ?').get(args.id);
+
+        if (!snippet) {
+          return {
+            content: [{ type: 'text', text: `Snippet ${args.id} not found` }],
+            isError: true
+          };
+        }
+
+        let response = `# ${snippet.title}\n\n`;
+        if (snippet.description) response += `${snippet.description}\n\n`;
+        response += `**Language:** ${snippet.language}\n`;
+        if (snippet.category) response += `**Category:** ${snippet.category}\n`;
+        if (snippet.tags) response += `**Tags:** ${snippet.tags}\n`;
+        response += `**Version:** ${snippet.current_version}\n`;
+        response += `**Used:** ${snippet.usage_count} times\n`;
+        if (snippet.last_used_at) response += `**Last used:** ${snippet.last_used_at}\n`;
+        response += `\n\`\`\`${snippet.language}\n${snippet.code}\n\`\`\`\n`;
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      case 'snippet_update': {
+        const { id, code, change_description } = args;
+
+        // Get current snippet
+        const snippet: any = db.prepare('SELECT * FROM code_snippets WHERE id = ?').get(id);
+        if (!snippet) {
+          return {
+            content: [{ type: 'text', text: `Snippet ${id} not found` }],
+            isError: true
+          };
+        }
+
+        const newVersion = snippet.current_version + 1;
+
+        // Create new version
+        db.prepare(`
+          INSERT INTO snippet_versions (snippet_id, version_number, code, change_description)
+          VALUES (?, ?, ?, ?)
+        `).run(id, newVersion, code, change_description || null);
+
+        // Update snippet
+        db.prepare(`
+          UPDATE code_snippets
+          SET code = ?, current_version = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(code, newVersion, id);
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Snippet updated to version ${newVersion}!\n\n` +
+                  `Use snippet_get_versions with id: ${id} to see version history.`
+          }]
+        };
+      }
+
+      case 'snippet_get_versions': {
+        const versions = db.prepare(`
+          SELECT * FROM snippet_versions
+          WHERE snippet_id = ?
+          ORDER BY version_number DESC
+        `).all(args.id);
+
+        if (versions.length === 0) {
+          return {
+            content: [{ type: 'text', text: `No versions found for snippet ${args.id}` }],
+            isError: true
+          };
+        }
+
+        let response = `# Version History for Snippet ${args.id}\n\n`;
+        versions.forEach((version: any) => {
+          response += `## Version ${version.version_number}\n`;
+          response += `**Created:** ${version.created_at}\n`;
+          if (version.change_description) {
+            response += `**Changes:** ${version.change_description}\n`;
+          }
+          response += `\n\`\`\`\n${version.code.substring(0, 200)}${version.code.length > 200 ? '...' : ''}\n\`\`\`\n\n`;
+        });
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      case 'snippet_track_usage': {
+        const { id, context } = args;
+
+        // Record usage
+        db.prepare(`
+          INSERT INTO snippet_usage (snippet_id, context)
+          VALUES (?, ?)
+        `).run(id, context || null);
+
+        // Update snippet stats
+        db.prepare(`
+          UPDATE code_snippets
+          SET usage_count = usage_count + 1,
+              last_used_at = datetime('now')
+          WHERE id = ?
+        `).run(id);
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Usage recorded for snippet ${id}`
+          }]
+        };
+      }
+
+      // ====================================================================
+      // TROUBLESHOOTING JOURNAL TOOLS
+      // ====================================================================
+
+      case 'issue_log': {
+        const { title, description, system, category, severity, error_message, stack_trace } = args;
+
+        const stmt = db.prepare(`
+          INSERT INTO troubleshooting_issues (
+            title, description, system, category, severity, error_message, stack_trace
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        const result = stmt.run(
+          title,
+          description,
+          system || null,
+          category || null,
+          severity || 'medium',
+          error_message || null,
+          stack_trace || null
+        );
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Issue logged!\n\n` +
+                  `**Issue ID:** ${result.lastInsertRowid}\n` +
+                  `**Title:** ${title}\n` +
+                  `**System:** ${system || 'Not specified'}\n` +
+                  `**Severity:** ${severity || 'medium'}\n` +
+                  `**Status:** open\n\n` +
+                  `Use issue_add_solution with issue_id: ${result.lastInsertRowid} when you find a fix.`
+          }]
+        };
+      }
+
+      case 'issue_add_solution': {
+        const { issue_id, solution, steps, worked, time_to_resolve, notes } = args;
+
+        // Check if issue exists
+        const issue: any = db.prepare('SELECT * FROM troubleshooting_issues WHERE id = ?').get(issue_id);
+        if (!issue) {
+          return {
+            content: [{ type: 'text', text: `Issue ${issue_id} not found` }],
+            isError: true
+          };
+        }
+
+        // Add solution
+        const stmt = db.prepare(`
+          INSERT INTO issue_solutions (issue_id, solution, steps, worked, time_to_resolve, notes)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+
+        const result = stmt.run(
+          issue_id,
+          solution,
+          steps || null,
+          worked !== undefined ? worked : 1,
+          time_to_resolve || null,
+          notes || null
+        );
+
+        // If solution worked, mark issue as resolved
+        if (worked === 1) {
+          db.prepare(`
+            UPDATE troubleshooting_issues
+            SET status = 'resolved', resolved_at = datetime('now')
+            WHERE id = ?
+          `).run(issue_id);
+        }
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Solution ${worked === 1 ? 'added' : 'recorded (marked as unsuccessful)'}!\n\n` +
+                  `**Solution ID:** ${result.lastInsertRowid}\n` +
+                  `**Issue:** ${issue.title}\n` +
+                  `**Status:** ${worked === 1 ? 'Resolved ✅' : 'Still investigating'}\n\n` +
+                  (worked === 1 ? `Great job solving this issue!` : `Keep trying - use issue_add_solution again when you find what works.`)
+          }]
+        };
+      }
+
+      case 'issue_search': {
+        const { query, system, status, limit } = args;
+        const maxResults = limit || 10;
+
+        let sql = 'SELECT * FROM troubleshooting_issues WHERE 1=1';
+        const params: any[] = [];
+
+        if (query) {
+          sql += ' AND (title LIKE ? OR description LIKE ? OR error_message LIKE ?)';
+          const searchTerm = `%${query}%`;
+          params.push(searchTerm, searchTerm, searchTerm);
+        }
+
+        if (system) {
+          sql += ' AND system = ?';
+          params.push(system);
+        }
+
+        if (status) {
+          sql += ' AND status = ?';
+          params.push(status);
+        }
+
+        sql += ' ORDER BY created_at DESC LIMIT ?';
+        params.push(maxResults);
+
+        const issues = db.prepare(sql).all(...params);
+
+        if (issues.length === 0) {
+          return {
+            content: [{ type: 'text', text: 'No matching issues found.' }]
+          };
+        }
+
+        let response = `Found ${issues.length} ${issues.length === 1 ? 'issue' : 'issues'}:\n\n`;
+        issues.forEach((issue: any) => {
+          const statusEmoji = issue.status === 'resolved' ? '✅' : issue.status === 'investigating' ? '🔍' : '❗';
+          response += `${statusEmoji} **[${issue.id}] ${issue.title}**\n`;
+          response += `System: ${issue.system || 'N/A'} | Severity: ${issue.severity} | Status: ${issue.status}\n`;
+          response += `Created: ${issue.created_at}\n`;
+          if (issue.error_message) {
+            response += `Error: ${issue.error_message.substring(0, 100)}${issue.error_message.length > 100 ? '...' : ''}\n`;
+          }
+
+          // Check if there are solutions
+          const solutionCount: any = db.prepare(
+            'SELECT COUNT(*) as count FROM issue_solutions WHERE issue_id = ?'
+          ).get(issue.id);
+
+          if (solutionCount.count > 0) {
+            response += `💡 ${solutionCount.count} ${solutionCount.count === 1 ? 'solution' : 'solutions'} documented\n`;
+          }
+
+          response += `\n`;
+        });
+
+        response += `Use issue_get_history with the ID to see full details and solutions.`;
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      case 'issue_link_related': {
+        const { issue_id, related_issue_id, relationship_type } = args;
+
+        // Check both issues exist
+        const issue1 = db.prepare('SELECT * FROM troubleshooting_issues WHERE id = ?').get(issue_id);
+        const issue2 = db.prepare('SELECT * FROM troubleshooting_issues WHERE id = ?').get(related_issue_id);
+
+        if (!issue1 || !issue2) {
+          return {
+            content: [{ type: 'text', text: 'One or both issues not found' }],
+            isError: true
+          };
+        }
+
+        // Create relationship
+        db.prepare(`
+          INSERT INTO related_issues (issue_id, related_issue_id, relationship_type)
+          VALUES (?, ?, ?)
+        `).run(issue_id, related_issue_id, relationship_type);
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Issues linked!\n\nIssue #${issue_id} ${relationship_type} Issue #${related_issue_id}`
+          }]
+        };
+      }
+
+      case 'issue_vote_solution': {
+        const { solution_id, vote_type } = args;
+
+        // Record vote
+        db.prepare(`
+          INSERT INTO solution_votes (solution_id, vote_type)
+          VALUES (?, ?)
+        `).run(solution_id, vote_type);
+
+        // Update solution upvote count
+        if (vote_type === 'up') {
+          db.prepare(`
+            UPDATE issue_solutions
+            SET upvotes = upvotes + 1
+            WHERE id = ?
+          `).run(solution_id);
+        }
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Vote recorded: ${vote_type === 'up' ? '👍' : '👎'}`
+          }]
+        };
+      }
+
+      case 'issue_get_history': {
+        const issue: any = db.prepare('SELECT * FROM troubleshooting_issues WHERE id = ?').get(args.issue_id);
+
+        if (!issue) {
+          return {
+            content: [{ type: 'text', text: `Issue ${args.issue_id} not found` }],
+            isError: true
+          };
+        }
+
+        let response = `# Issue #${issue.id}: ${issue.title}\n\n`;
+        response += `**System:** ${issue.system || 'N/A'}\n`;
+        response += `**Category:** ${issue.category || 'N/A'}\n`;
+        response += `**Severity:** ${issue.severity}\n`;
+        response += `**Status:** ${issue.status}\n`;
+        response += `**Created:** ${issue.created_at}\n`;
+        if (issue.resolved_at) response += `**Resolved:** ${issue.resolved_at}\n`;
+        response += `\n## Description\n${issue.description}\n\n`;
+
+        if (issue.error_message) {
+          response += `## Error Message\n\`\`\`\n${issue.error_message}\n\`\`\`\n\n`;
+        }
+
+        // Get solutions
+        const solutions = db.prepare(`
+          SELECT * FROM issue_solutions
+          WHERE issue_id = ?
+          ORDER BY worked DESC, upvotes DESC, created_at ASC
+        `).all(args.issue_id);
+
+        if (solutions.length > 0) {
+          response += `## Solutions (${solutions.length})\n\n`;
+          solutions.forEach((sol: any, index: number) => {
+            const solEmoji = sol.worked ? '✅' : '❌';
+            response += `### ${solEmoji} Solution ${index + 1} ${sol.upvotes > 0 ? `(👍 ${sol.upvotes})` : ''}\n`;
+            response += `${sol.solution}\n\n`;
+            if (sol.steps) {
+              response += `**Steps:**\n${sol.steps}\n\n`;
+            }
+            if (sol.time_to_resolve) {
+              response += `**Time to resolve:** ${sol.time_to_resolve}\n\n`;
+            }
+            if (sol.notes) {
+              response += `**Notes:** ${sol.notes}\n\n`;
+            }
+          });
+        } else {
+          response += `## Solutions\nNo solutions documented yet.\n\n`;
+        }
+
+        // Get related issues
+        const related = db.prepare(`
+          SELECT ri.*, ti.title
+          FROM related_issues ri
+          JOIN troubleshooting_issues ti ON ri.related_issue_id = ti.id
+          WHERE ri.issue_id = ?
+        `).all(args.issue_id);
+
+        if (related.length > 0) {
+          response += `## Related Issues\n`;
+          related.forEach((rel: any) => {
+            response += `- #${rel.related_issue_id}: ${rel.title} (${rel.relationship_type})\n`;
+          });
+        }
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      // ====================================================================
+      // NEWS AGGREGATOR TOOLS (Phase 3c)
+      // ====================================================================
+
+      case 'news_add_feed': {
+        const { name, url, category = 'technology', fetch_interval = 120 } = args;
+
+        db.prepare(`
+          INSERT INTO rss_feeds (name, url, category, fetch_interval, is_active)
+          VALUES (?, ?, ?, ?, 1)
+        `).run(name, url, category, fetch_interval);
+
+        return {
+          content: [{
+            type: 'text',
+            text: `RSS feed added: ${name}\nURL: ${url}\nCategory: ${category}\nFetch interval: ${fetch_interval} minutes`
+          }]
+        };
+      }
+
+      case 'news_remove_feed': {
+        const { feed_id } = args;
+
+        db.prepare('UPDATE rss_feeds SET is_active = 0 WHERE id = ?').run(feed_id);
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Feed ${feed_id} removed (deactivated)`
+          }]
+        };
+      }
+
+      case 'news_list_feeds': {
+        const { category, active_only = 1 } = args;
+
+        let query = 'SELECT * FROM rss_feeds WHERE 1=1';
+        const params: any[] = [];
+
+        if (active_only === 1) {
+          query += ' AND is_active = 1';
+        }
+
+        if (category) {
+          query += ' AND category = ?';
+          params.push(category);
+        }
+
+        query += ' ORDER BY category, name';
+
+        const feeds = db.prepare(query).all(...params);
+
+        let response = `# RSS Feeds (${feeds.length})\n\n`;
+
+        let currentCategory = '';
+        feeds.forEach((feed: any) => {
+          if (feed.category !== currentCategory) {
+            currentCategory = feed.category;
+            response += `\n## ${currentCategory.toUpperCase()}\n\n`;
+          }
+
+          const status = feed.is_active ? '✓' : '✗';
+          response += `${status} **${feed.name}** (ID: ${feed.id})\n`;
+          response += `   URL: ${feed.url}\n`;
+          response += `   Fetch: Every ${feed.fetch_interval} min | Last: ${feed.last_fetched || 'Never'}\n\n`;
+        });
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      case 'news_add_keyword': {
+        const { feed_id, keyword, priority = 'medium', alert_enabled = 0 } = args;
+
+        if (feed_id) {
+          db.prepare(`
+            INSERT INTO feed_keywords (feed_id, keyword, priority, alert_enabled)
+            VALUES (?, ?, ?, ?)
+          `).run(feed_id, keyword, priority, alert_enabled);
+        } else {
+          // Add keyword to all feeds
+          const feeds = db.prepare('SELECT id FROM rss_feeds WHERE is_active = 1').all();
+          feeds.forEach((feed: any) => {
+            db.prepare(`
+              INSERT INTO feed_keywords (feed_id, keyword, priority, alert_enabled)
+              VALUES (?, ?, ?, ?)
+            `).run(feed.id, keyword, priority, alert_enabled);
+          });
+        }
+
+        const scope = feed_id ? `feed ${feed_id}` : 'all active feeds';
+        const alertMsg = alert_enabled === 1 ? ' (alerts enabled)' : '';
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Keyword "${keyword}" added to ${scope}\nPriority: ${priority}${alertMsg}`
+          }]
+        };
+      }
+
+      case 'news_fetch_now': {
+        const { feed_id } = args;
+
+        const feeds = feed_id
+          ? [db.prepare('SELECT * FROM rss_feeds WHERE id = ? AND is_active = 1').get(feed_id)]
+          : db.prepare('SELECT * FROM rss_feeds WHERE is_active = 1').all();
+
+        if (!feeds || feeds.length === 0) {
+          return {
+            content: [{ type: 'text', text: 'No active feeds to fetch' }],
+            isError: true
+          };
+        }
+
+        let fetchedCount = 0;
+        let newArticles = 0;
+
+        for (const feed of feeds) {
+          try {
+            const rssFeed = await rssParser.parseURL((feed as any).url);
+            fetchedCount++;
+
+            rssFeed.items.forEach((item: any) => {
+              const existing = db.prepare('SELECT id FROM articles WHERE url = ?').get(item.link);
+
+              if (!existing) {
+                db.prepare(`
+                  INSERT INTO articles (feed_id, title, url, content, published_at, fetched_at)
+                  VALUES (?, ?, ?, ?, ?, datetime('now'))
+                `).run((feed as any).id, item.title, item.link, item.contentSnippet || item.content, item.pubDate);
+                newArticles++;
+              }
+            });
+
+            db.prepare('UPDATE rss_feeds SET last_fetched = datetime(\'now\') WHERE id = ?').run((feed as any).id);
+          } catch (error: any) {
+            console.error(`Error fetching feed ${(feed as any).id}: ${error.message}`);
+          }
+        }
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Fetched ${fetchedCount} feeds\nNew articles: ${newArticles}`
+          }]
+        };
+      }
+
+      case 'news_list_articles': {
+        const { feed_id, keyword, limit = 20, min_relevance = 0 } = args;
+
+        let query = 'SELECT a.*, f.name as feed_name FROM articles a JOIN rss_feeds f ON a.feed_id = f.id WHERE 1=1';
+        const params: any[] = [];
+
+        if (feed_id) {
+          query += ' AND a.feed_id = ?';
+          params.push(feed_id);
+        }
+
+        if (keyword) {
+          query += ' AND (a.title LIKE ? OR a.content LIKE ?)';
+          params.push(`%${keyword}%`, `%${keyword}%`);
+        }
+
+        query += ' ORDER BY a.published_at DESC LIMIT ?';
+        params.push(limit);
+
+        const articles = db.prepare(query).all(...params);
+
+        let response = `# Recent Articles (${articles.length})\n\n`;
+
+        articles.forEach((article: any, index: number) => {
+          response += `## ${index + 1}. ${article.title}\n`;
+          response += `**Feed:** ${article.feed_name} | **Published:** ${article.published_at}\n`;
+          response += `**URL:** ${article.url}\n`;
+          if (article.content) {
+            response += `${article.content.substring(0, 200)}...\n`;
+          }
+          response += `\n`;
+        });
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      case 'news_get_summary': {
+        const { article_id } = args;
+
+        const article: any = db.prepare('SELECT * FROM articles WHERE id = ?').get(article_id);
+
+        if (!article) {
+          return {
+            content: [{ type: 'text', text: 'Article not found' }],
+            isError: true
+          };
+        }
+
+        // Generate AI summary using OpenAI
+        try {
+          const summaryResponse = await openai.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [{
+              role: 'user',
+              content: `Summarize this article in 3-4 sentences:\n\nTitle: ${article.title}\n\nContent: ${article.content}`
+            }],
+            max_tokens: 150
+          });
+
+          const summary = summaryResponse.choices[0].message.content;
+
+          return {
+            content: [{
+              type: 'text',
+              text: `# ${article.title}\n\n**Summary:**\n${summary}\n\n**Full Article:** ${article.url}`
+            }]
+          };
+        } catch (error: any) {
+          return {
+            content: [{
+              type: 'text',
+              text: `# ${article.title}\n\n${article.content}\n\n**URL:** ${article.url}`
+            }]
+          };
+        }
+      }
+
+      case 'news_save_article': {
+        const { article_id, notes = '' } = args;
+
+        const article = db.prepare('SELECT title FROM articles WHERE id = ?').get(article_id);
+
+        if (!article) {
+          return {
+            content: [{ type: 'text', text: 'Article not found' }],
+            isError: true
+          };
+        }
+
+        db.prepare(`
+          INSERT INTO saved_articles (article_id, notes, saved_at)
+          VALUES (?, ?, datetime('now'))
+        `).run(article_id, notes);
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Article saved: ${(article as any).title}\n${notes ? `Notes: ${notes}` : ''}`
+          }]
+        };
+      }
+
+      case 'news_get_trending': {
+        const { category, days = 7 } = args;
+
+        let query = `
+          SELECT k.keyword, COUNT(*) as mention_count, k.priority
+          FROM feed_keywords k
+          JOIN articles a ON k.feed_id = a.feed_id
+          WHERE (a.title LIKE '%' || k.keyword || '%' OR a.content LIKE '%' || k.keyword || '%')
+          AND a.published_at >= datetime('now', '-${days} days')
+        `;
+
+        if (category) {
+          query += ` AND a.feed_id IN (SELECT id FROM rss_feeds WHERE category = '${category}')`;
+        }
+
+        query += ` GROUP BY k.keyword ORDER BY mention_count DESC, k.priority DESC LIMIT 20`;
+
+        const trending = db.prepare(query).all();
+
+        let response = `# Trending Topics (Last ${days} Days)\n\n`;
+
+        trending.forEach((topic: any, index: number) => {
+          const priorityEmoji = topic.priority === 'critical' ? '🔥' : topic.priority === 'high' ? '⚠️' : '📌';
+          response += `${index + 1}. ${priorityEmoji} **${topic.keyword}** - ${topic.mention_count} mentions\n`;
+        });
+
+        return {
+          content: [{ type: 'text', text: response }]
+        };
+      }
+
+      default:
+        return {
+          content: [{
+            type: 'text',
+            text: `Unknown tool: "${name}"`
+          }],
+          isError: true
+        };
+    }
+  } catch (error: any) {
+    return {
+      content: [{
+        type: 'text',
+        text: `Error: ${error.message}\n\nStack: ${error.stack}`
+      }],
+      isError: true
+    };
+  }
+});
+
+// ============================================================================
+// SERVER STARTUP
+// ============================================================================
+
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error('AI Hub Memory MCP Server v2.0 Phase 3c running on stdio');
+  console.error(`- Knowledge Base: Full semantic search enabled`);
+  console.error(`- Security+ Quiz: 6 tools active`);
+  console.error(`- Code Snippets: 6 tools active (version tracking, usage analytics)`);
+  console.error(`- Troubleshooting: 6 tools active (solution history, issue linking)`);
+  console.error(`- News Aggregator: 9 tools active (RSS feeds, AI summaries, trending topics)`);
+  console.error(`- Personal Memory: Todos and reminders active`);
+  console.error(`- Total: 34 active MCP tools`);
+}
+
+main().catch((error) => {
+  console.error('Fatal error:', error);
+  process.exit(1);
+});

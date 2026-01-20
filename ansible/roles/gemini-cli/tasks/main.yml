@@ -1,0 +1,62 @@
+---
+# Install and configure Gemini CLI
+
+- name: Install python3-venv package
+  apt:
+    name: python3-venv
+    state: present
+    update_cache: yes
+
+- name: Create venvs directory
+  file:
+    path: /opt/ai-hub/venvs
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+
+- name: Create virtual environment for Gemini
+  command: python3 -m venv /opt/ai-hub/venvs/gemini
+  args:
+    creates: /opt/ai-hub/venvs/gemini/bin/python3
+  become_user: "{{ ai_hub_user }}"
+
+- name: Install google-generativeai in virtual environment
+  pip:
+    name: google-generativeai
+    state: "{{ 'latest' if gemini_cli_version == 'latest' else 'present' }}"
+    virtualenv: /opt/ai-hub/venvs/gemini
+  become_user: "{{ ai_hub_user }}"
+
+- name: Create Gemini config directory
+  file:
+    path: "{{ gemini_config_dir }}"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0700'
+
+- name: Configure Gemini API key
+  template:
+    src: config.json.j2
+    dest: "{{ gemini_config_dir }}/config.json"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+  when: gemini_api_key is defined and gemini_api_key | length > 0
+
+- name: Create Gemini CLI wrapper script
+  template:
+    src: gemini.sh.j2
+    dest: /usr/local/bin/gemini
+    mode: '0755'
+
+- name: Verify Gemini SDK installation
+  command: /opt/ai-hub/venvs/gemini/bin/python3 -c "import google.generativeai; print('Gemini SDK version:', google.generativeai.__version__)"
+  register: gemini_check
+  changed_when: false
+  failed_when: false
+
+- name: Display Gemini status
+  debug:
+    msg: "{{ gemini_check.stdout if gemini_check.rc == 0 else 'Gemini SDK installation completed' }}"

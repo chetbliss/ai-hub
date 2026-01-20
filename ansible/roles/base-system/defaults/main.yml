@@ -1,0 +1,30 @@
+---
+# Default variables for base-system role
+
+# Node.js version to install
+nodejs_major_version: "20"
+
+# Common packages to install
+common_packages:
+  - git
+  - curl
+  - wget
+  - vim
+  - htop
+  - jq
+  - unzip
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - python3
+  - python3-pip
+  - build-essential
+
+# Directories to create
+base_directories:
+  - "{{ ai_hub_base_path }}"
+  - "{{ mcp_servers_path }}"
+  - "{{ data_path }}"
+  - "{{ repos_path }}"
+  - "{{ ai_hub_base_path }}/logs"
+  - "{{ ai_hub_base_path }}/config"

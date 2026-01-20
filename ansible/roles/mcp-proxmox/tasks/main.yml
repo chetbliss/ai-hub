@@ -1,0 +1,52 @@
+---
+# Deploy Proxmox MCP server
+
+- name: Clone Proxmox MCP server repository
+  git:
+    repo: "{{ mcp_proxmox_repo }}"
+    dest: "{{ mcp_proxmox_dir }}"
+    version: "{{ mcp_proxmox_branch }}"
+    force: yes
+  become_user: "{{ ai_hub_user }}"
+
+- name: Check if package.json exists
+  stat:
+    path: "{{ mcp_proxmox_dir }}/package.json"
+  register: package_json
+
+- name: Install Proxmox MCP dependencies
+  npm:
+    path: "{{ mcp_proxmox_dir }}"
+    state: present
+  become_user: "{{ ai_hub_user }}"
+  when: package_json.stat.exists
+
+- name: Build Proxmox MCP server (if TypeScript)
+  command: npm run build
+  args:
+    chdir: "{{ mcp_proxmox_dir }}"
+  become_user: "{{ ai_hub_user }}"
+  when: package_json.stat.exists
+  ignore_errors: yes
+
+- name: Create Proxmox MCP environment file
+  template:
+    src: .env.j2
+    dest: "{{ mcp_servers_path }}/.env"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+
+- name: Set directory permissions
+  file:
+    path: "{{ mcp_proxmox_dir }}"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    recurse: yes
+
+- name: Display Proxmox MCP status
+  debug:
+    msg: |
+      Proxmox MCP server configured:
+        - Location: {{ mcp_proxmox_dir }}
+        - Repository: {{ mcp_proxmox_repo }}

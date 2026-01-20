@@ -1,0 +1,6 @@
+---
+# Default variables for mcp-unifi role
+
+mcp_unifi_dir: "{{ mcp_servers_path }}/unifi-network-mcp"
+mcp_unifi_repo: https://github.com/sirkirby/unifi-network-mcp.git
+mcp_unifi_branch: main

@@ -1,0 +1,6 @@
+---
+# Default variables for mcp-proxmox role
+
+mcp_proxmox_dir: "{{ mcp_servers_path }}/mcp-proxmox"
+mcp_proxmox_repo: https://github.com/gilby125/mcp-proxmox.git
+mcp_proxmox_branch: main

@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""
+AI Hub Documentation Ingestion Script
+Ingests markdown files from homelab-migration repo into Qdrant
+"""
+
+import os
+import sys
+from pathlib import Path
+from typing import List, Dict
+import hashlib
+
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+from openai import OpenAI
+
+# Configuration from environment
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+QDRANT_URL = os.getenv('QDRANT_URL', '{{ qdrant_url }}')
+QDRANT_COLLECTION = os.getenv('QDRANT_COLLECTION', '{{ qdrant_collection }}')
+DOCS_PATH = os.getenv('DOCS_PATH', '{{ docs_repo_path }}')
+EMBEDDING_MODEL = '{{ embedding_model }}'
+EMBEDDING_DIMENSIONS = {{ embedding_dimensions }}
+
+# Chunk settings
+CHUNK_SIZE = 1000  # characters
+CHUNK_OVERLAP = 200  # characters
+
+def chunk_text(text: str, file_path: str) -> List[Dict]:
+    """Split text into overlapping chunks"""
+    chunks = []
+    start = 0
+    chunk_num = 0
+
+    while start < len(text):
+        end = start + CHUNK_SIZE
+        chunk_text = text[start:end]
+
+        # Don't create tiny chunks at the end
+        if len(chunk_text) < 100 and chunks:
+            chunks[-1]['text'] += ' ' + chunk_text
+            break
+
+        chunks.append({
+            'text': chunk_text,
+            'file_path': file_path,
+            'chunk_num': chunk_num,
+            'chunk_id': f"{file_path}:chunk{chunk_num}"
+        })
+
+        chunk_num += 1
+        start = end - CHUNK_OVERLAP
+
+    return chunks
+
+def find_markdown_files(root_path: str) -> List[str]:
+    """Find all markdown files in directory"""
+    md_files = []
+    for path in Path(root_path).rglob('*.md'):
+        # Skip node_modules and hidden directories
+        if 'node_modules' in str(path) or '/.git' in str(path):
+            continue
+        md_files.append(str(path))
+    return md_files
+
+def generate_embedding(text: str, client: OpenAI) -> List[float]:
+    """Generate embedding for text using OpenAI"""
+    response = client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=text
+    )
+    return response.data[0].embedding
+
+def main():
+    print("=" * 60)
+    print("AI Hub Documentation Ingestion")
+    print("=" * 60)
+
+    # Initialize clients
+    print(f"\nConnecting to Qdrant at {QDRANT_URL}...")
+    qdrant = QdrantClient(url=QDRANT_URL)
+
+    print("Connecting to OpenAI...")
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+    # Find markdown files
+    print(f"\nSearching for markdown files in {DOCS_PATH}...")
+    md_files = find_markdown_files(DOCS_PATH)
+    print(f"Found {len(md_files)} markdown files")
+
+    if not md_files:
+        print("No markdown files found!")
+        return 1
+
+    # Process files
+    all_chunks = []
+    for i, file_path in enumerate(md_files, 1):
+        rel_path = os.path.relpath(file_path, DOCS_PATH)
+        print(f"[{i}/{len(md_files)}] Processing: {rel_path}")
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            chunks = chunk_text(content, rel_path)
+            all_chunks.extend(chunks)
+            print(f"  → Created {len(chunks)} chunks")
+
+        except Exception as e:
+            print(f"  → Error: {e}")
+            continue
+
+    print(f"\nTotal chunks to ingest: {len(all_chunks)}")
+
+    # Generate embeddings and upload to Qdrant
+    print("\nGenerating embeddings and uploading to Qdrant...")
+    points = []
+
+    for i, chunk in enumerate(all_chunks, 1):
+        if i % 10 == 0:
+            print(f"  Processing chunk {i}/{len(all_chunks)}...")
+
+        try:
+            # Generate embedding
+            embedding = generate_embedding(chunk['text'], openai_client)
+
+            # Create point ID from chunk_id hash
+            point_id = int(hashlib.md5(chunk['chunk_id'].encode()).hexdigest()[:16], 16) % (2**63)
+
+            # Create point
+            point = PointStruct(
+                id=point_id,
+                vector=embedding,
+                payload={
+                    'text': chunk['text'],
+                    'file_path': chunk['file_path'],
+                    'chunk_num': chunk['chunk_num'],
+                    'chunk_id': chunk['chunk_id'],
+                    'source': 'homelab-migration'
+                }
+            )
+            points.append(point)
+
+            # Upload in batches of 100
+            if len(points) >= 100:
+                qdrant.upsert(
+                    collection_name=QDRANT_COLLECTION,
+                    points=points
+                )
+                points = []
+
+        except Exception as e:
+            print(f"  → Error processing chunk {i}: {e}")
+            continue
+
+    # Upload remaining points
+    if points:
+        qdrant.upsert(
+            collection_name=QDRANT_COLLECTION,
+            points=points
+        )
+
+    print("\n" + "=" * 60)
+    print("Ingestion completed successfully!")
+    print(f"Ingested {len(all_chunks)} chunks from {len(md_files)} files")
+    print("=" * 60)
+
+    return 0
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\n\nIngestion cancelled by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n\nFatal error: {e}")
+        sys.exit(1)

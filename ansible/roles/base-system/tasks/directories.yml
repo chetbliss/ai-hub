@@ -1,0 +1,25 @@
+---
+# Create AI Hub directory structure
+
+- name: Create base directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+  loop: "{{ base_directories }}"
+
+- name: Verify directories exist
+  stat:
+    path: "{{ ai_hub_base_path }}"
+  register: base_path_stat
+
+- name: Display directory structure
+  debug:
+    msg: |
+      AI Hub directories created:
+        - Base: {{ ai_hub_base_path }}
+        - MCP Servers: {{ mcp_servers_path }}
+        - Data: {{ data_path }}
+        - Repos: {{ repos_path }}

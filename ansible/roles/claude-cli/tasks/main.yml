@@ -1,0 +1,36 @@
+---
+# Install and configure Claude CLI
+
+- name: Install Claude CLI globally
+  npm:
+    name: "@anthropic-ai/claude-code"
+    global: yes
+    state: "{{ 'latest' if claude_cli_version == 'latest' else 'present' }}"
+    version: "{{ omit if claude_cli_version == 'latest' else claude_cli_version }}"
+
+- name: Create Claude config directory
+  file:
+    path: "{{ claude_config_dir }}"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0700'
+
+- name: Configure Claude API key
+  template:
+    src: config.json.j2
+    dest: "{{ claude_config_dir }}/config.json"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+  when: anthropic_api_key is defined and anthropic_api_key | length > 0
+
+- name: Verify Claude CLI installation
+  command: claude --version
+  register: claude_version
+  changed_when: false
+  failed_when: false
+
+- name: Display Claude CLI version
+  debug:
+    msg: "Claude CLI installed: {{ claude_version.stdout if claude_version.rc == 0 else 'Installation completed' }}"

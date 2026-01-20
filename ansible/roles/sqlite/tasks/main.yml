@@ -1,0 +1,97 @@
+---
+# Install SQLite and initialize database
+
+- name: Install SQLite packages
+  apt:
+    name: "{{ sqlite_packages }}"
+    state: present
+    update_cache: yes
+
+- name: Create data directory for SQLite database
+  file:
+    path: "{{ data_path }}"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+
+- name: Copy database schema
+  template:
+    src: schema.sql.j2
+    dest: "{{ data_path }}/schema.sql"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+
+- name: Check if database schema is initialized
+  shell: sqlite3 {{ sqlite_db_path }} "SELECT name FROM sqlite_master WHERE type='table' AND name='quiz_questions';" 2>/dev/null || echo ""
+  register: schema_check
+  become_user: "{{ ai_hub_user }}"
+  changed_when: false
+  failed_when: false
+
+- name: Initialize database with schema
+  shell: sqlite3 {{ sqlite_db_path }} < {{ data_path }}/schema.sql
+  when: schema_check.stdout == ""
+  become_user: "{{ ai_hub_user }}"
+
+- name: Set database file permissions
+  file:
+    path: "{{ sqlite_db_path }}"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+
+- name: Copy Security+ starter questions
+  copy:
+    src: security-plus-questions.sql
+    dest: "{{ data_path }}/security-plus-questions.sql"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+
+- name: Copy RSS feed starter data
+  copy:
+    src: rss-feeds.sql
+    dest: "{{ data_path }}/rss-feeds.sql"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+
+- name: Check if starter data already loaded
+  command: sqlite3 {{ sqlite_db_path }} "SELECT COUNT(*) FROM quiz_questions"
+  register: question_count
+  become_user: "{{ ai_hub_user }}"
+  changed_when: false
+  failed_when: false
+
+- name: Load Security+ starter questions
+  shell: sqlite3 {{ sqlite_db_path }} < {{ data_path }}/security-plus-questions.sql
+  when: question_count.stdout | int == 0
+  become_user: "{{ ai_hub_user }}"
+
+- name: Load RSS feed starter data
+  shell: sqlite3 {{ sqlite_db_path }} < {{ data_path }}/rss-feeds.sql
+  when: question_count.stdout | int == 0
+  become_user: "{{ ai_hub_user }}"
+
+- name: Verify SQLite installation
+  command: sqlite3 --version
+  register: sqlite_version
+  changed_when: false
+
+- name: Get starter data counts
+  command: sqlite3 {{ sqlite_db_path }} "SELECT (SELECT COUNT(*) FROM quiz_questions) || ',' || (SELECT COUNT(*) FROM rss_feeds)"
+  register: data_counts
+  become_user: "{{ ai_hub_user }}"
+  changed_when: false
+
+- name: Display SQLite status
+  debug:
+    msg: |
+      SQLite configured:
+        - Version: {{ sqlite_version.stdout }}
+        - Database: {{ sqlite_db_path }}
+        - Schema initialized: {{ 'Yes' if schema_check.stdout == '' else 'Already exists' }}
+        - Security+ questions: {{ data_counts.stdout.split(',')[0] }}
+        - RSS feeds: {{ data_counts.stdout.split(',')[1] }}

@@ -1,0 +1,62 @@
+---
+# Deploy Qdrant vector database
+
+- name: Create Qdrant data directory
+  file:
+    path: "{{ qdrant_data_dir }}"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+
+- name: Pull Qdrant Docker image
+  community.docker.docker_image:
+    name: "qdrant/qdrant:{{ qdrant_version }}"
+    source: pull
+
+- name: Deploy Qdrant container
+  community.docker.docker_container:
+    name: "{{ qdrant_container_name }}"
+    image: "qdrant/qdrant:{{ qdrant_version }}"
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "{{ qdrant_port }}:6333"
+      - "{{ qdrant_grpc_port }}:6334"
+    volumes:
+      - "{{ qdrant_data_dir }}:/qdrant/storage"
+    env:
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__SERVICE__GRPC_PORT: "6334"
+
+- name: Wait for Qdrant to be ready
+  uri:
+    url: "http://localhost:{{ qdrant_port }}/healthz"
+    status_code: 200
+  register: result
+  until: result.status == 200
+  retries: 30
+  delay: 2
+
+- name: Create knowledge base collection
+  uri:
+    url: "http://localhost:{{ qdrant_port }}/collections/{{ qdrant_collection }}"
+    method: PUT
+    body_format: json
+    body:
+      vectors:
+        size: "{{ embedding_dimensions }}"
+        distance: "Cosine"
+      optimizers_config:
+        indexing_threshold: 10000
+    status_code: [200, 201, 409]
+  register: collection_result
+
+- name: Display Qdrant status
+  debug:
+    msg: |
+      Qdrant deployed successfully:
+        - REST API: http://localhost:{{ qdrant_port }}
+        - gRPC API: localhost:{{ qdrant_grpc_port }}
+        - Collection: {{ qdrant_collection }}
+        - Data directory: {{ qdrant_data_dir }}

@@ -1,0 +1,53 @@
+---
+# Deploy n8n workflow automation
+
+- name: Create n8n data directory
+  file:
+    path: "{{ n8n_data_dir }}"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+
+- name: Pull n8n Docker image
+  community.docker.docker_image:
+    name: "n8nio/n8n:{{ n8n_version }}"
+    source: pull
+
+- name: Deploy n8n container
+  community.docker.docker_container:
+    name: "{{ n8n_container_name }}"
+    image: "n8nio/n8n:{{ n8n_version }}"
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "{{ n8n_port }}:5678"
+    volumes:
+      - "{{ n8n_data_dir }}:/home/node/.n8n"
+    env:
+      GENERIC_TIMEZONE: "{{ n8n_timezone }}"
+      TZ: "{{ n8n_timezone }}"
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: "{{ ai_hub_user }}"
+      N8N_BASIC_AUTH_PASSWORD: "{{ lookup('password', '/tmp/n8n_password chars=ascii_letters,digits length=16') }}"
+      WEBHOOK_URL: "http://{{ ansible_host }}:{{ n8n_port }}/"
+      ANTHROPIC_API_KEY: "{{ anthropic_api_key }}"
+      OPENAI_API_KEY: "{{ openai_api_key }}"
+
+- name: Wait for n8n to be ready
+  uri:
+    url: "http://localhost:{{ n8n_port }}"
+    status_code: [200, 401]
+  register: result
+  until: result.status in [200, 401]
+  retries: 30
+  delay: 2
+
+- name: Display n8n status
+  debug:
+    msg: |
+      n8n deployed successfully:
+        - Web UI: http://{{ ansible_host }}:{{ n8n_port }}
+        - Username: {{ ai_hub_user }}
+        - Password: {{ lookup('password', '/tmp/n8n_password chars=ascii_letters,digits length=16') }}
+        - Data directory: {{ n8n_data_dir }}

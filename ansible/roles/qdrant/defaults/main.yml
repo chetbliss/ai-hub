@@ -1,0 +1,8 @@
+---
+# Default variables for qdrant role
+
+qdrant_version: latest
+qdrant_port: 6333
+qdrant_grpc_port: 6334
+qdrant_data_dir: "{{ data_path }}/qdrant"
+qdrant_container_name: qdrant

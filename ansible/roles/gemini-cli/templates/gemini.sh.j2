@@ -1,0 +1,27 @@
+#!/bin/bash
+# Gemini CLI wrapper script
+
+CONFIG_FILE="{{ gemini_config_dir }}/config.json"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Error: Gemini config not found at $CONFIG_FILE"
+    exit 1
+fi
+
+export GEMINI_API_KEY=$(jq -r '.apiKey' "$CONFIG_FILE")
+
+/opt/ai-hub/venvs/gemini/bin/python3 -c "
+import sys
+import google.generativeai as genai
+
+genai.configure(api_key='$GEMINI_API_KEY')
+model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+if len(sys.argv) > 1:
+    prompt = ' '.join(sys.argv[1:])
+    response = model.generate_content(prompt)
+    print(response.text)
+else:
+    print('Usage: gemini <prompt>')
+    print('Example: gemini \"What is the weather like?\"')
+" "$@"

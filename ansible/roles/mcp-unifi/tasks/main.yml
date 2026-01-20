@@ -1,0 +1,48 @@
+---
+# Deploy UniFi MCP server (Python/Docker-based)
+
+- name: Clone UniFi MCP server repository
+  git:
+    repo: "{{ mcp_unifi_repo }}"
+    dest: "{{ mcp_unifi_dir }}"
+    version: "{{ mcp_unifi_branch }}"
+    force: yes
+  become_user: "{{ ai_hub_user }}"
+
+- name: Check if requirements.txt exists
+  stat:
+    path: "{{ mcp_unifi_dir }}/requirements.txt"
+  register: requirements_txt
+
+- name: Install Python dependencies for UniFi MCP
+  pip:
+    requirements: "{{ mcp_unifi_dir }}/requirements.txt"
+    state: present
+    executable: pip3
+  when: requirements_txt.stat.exists
+
+- name: Create UniFi MCP environment file
+  template:
+    src: .env.unifi.j2
+    dest: "{{ mcp_servers_path }}/.env.unifi"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+  when: unifi_password is defined and unifi_password | length > 0
+
+- name: Set directory permissions
+  file:
+    path: "{{ mcp_unifi_dir }}"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    recurse: yes
+
+- name: Display UniFi MCP status
+  debug:
+    msg: |
+      UniFi MCP server configured:
+        - Location: {{ mcp_unifi_dir }}
+        - Repository: {{ mcp_unifi_repo }}
+        - Configuration: {{ 'Ready' if (unifi_password is defined and unifi_password | length > 0) else 'Needs credentials (MFA issue - see docs)' }}
+        - Note: This is a Python/Docker-based MCP server
+        - To test: cd {{ mcp_unifi_dir }} && python3 server.py

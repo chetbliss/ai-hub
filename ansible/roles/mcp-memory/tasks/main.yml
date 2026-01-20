@@ -1,0 +1,102 @@
+---
+# Deploy custom Memory MCP server
+
+- name: Create Memory MCP directory
+  file:
+    path: "{{ mcp_memory_dir }}"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+
+- name: Create src directory
+  file:
+    path: "{{ mcp_memory_dir }}/src"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+
+- name: Copy package.json
+  template:
+    src: package.json.j2
+    dest: "{{ mcp_memory_dir }}/package.json"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+
+- name: Copy tsconfig.json
+  template:
+    src: tsconfig.json.j2
+    dest: "{{ mcp_memory_dir }}/tsconfig.json"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+
+- name: Copy Memory MCP server code
+  template:
+    src: index.ts.j2
+    dest: "{{ mcp_memory_dir }}/src/index.ts"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+
+- name: Copy environment file
+  template:
+    src: .env.j2
+    dest: "{{ mcp_memory_dir }}/.env"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+
+- name: Install Memory MCP dependencies
+  npm:
+    path: "{{ mcp_memory_dir }}"
+    state: present
+  become_user: "{{ ai_hub_user }}"
+
+- name: Build Memory MCP server
+  command: npm run build
+  args:
+    chdir: "{{ mcp_memory_dir }}"
+  become_user: "{{ ai_hub_user }}"
+
+- name: Create PM2 ecosystem file
+  template:
+    src: ecosystem.config.cjs.j2
+    dest: "{{ mcp_memory_dir }}/ecosystem.config.cjs"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+
+- name: Stop existing PM2 process (if any)
+  command: pm2 delete mcp-memory
+  become_user: "{{ ai_hub_user }}"
+  ignore_errors: yes
+
+- name: Start Memory MCP server with PM2
+  command: pm2 start ecosystem.config.cjs
+  args:
+    chdir: "{{ mcp_memory_dir }}"
+  become_user: "{{ ai_hub_user }}"
+
+- name: Save PM2 configuration
+  command: pm2 save
+  become_user: "{{ ai_hub_user }}"
+
+- name: Setup PM2 startup script
+  command: pm2 startup systemd -u {{ ai_hub_user }} --hp /home/{{ ai_hub_user }}
+  register: pm2_startup
+
+- name: Execute PM2 startup command
+  shell: "{{ pm2_startup.stdout_lines[-1] | regex_replace('^\\$ ', '') }}"
+  when: pm2_startup.stdout_lines | length > 0
+
+- name: Display Memory MCP status
+  debug:
+    msg: |
+      Memory MCP server deployed:
+        - Location: {{ mcp_memory_dir }}
+        - Port: {{ mcp_memory_port }}
+        - Process: Managed by PM2
+        - Status: pm2 status

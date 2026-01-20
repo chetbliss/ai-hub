@@ -1,0 +1,27 @@
+---
+# Main tasks for base-system role
+
+- name: Install common packages
+  include_tasks: packages.yml
+  tags: [base-system, packages]
+
+- name: Install Docker
+  include_tasks: docker.yml
+  tags: [base-system, docker]
+
+- name: Install Node.js
+  include_tasks: nodejs.yml
+  tags: [base-system, nodejs]
+
+- name: Create directory structure
+  include_tasks: directories.yml
+  tags: [base-system, directories]
+
+- name: Display base system info
+  debug:
+    msg: |
+      Base system configured:
+        - Docker: Installed
+        - Node.js: v{{ nodejs_major_version }}
+        - Base path: {{ ai_hub_base_path }}
+        - User: {{ ai_hub_user }}

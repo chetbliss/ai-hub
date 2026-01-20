@@ -1,0 +1,19 @@
+module.exports = {
+  apps: [{
+    name: 'mcp-memory',
+    script: 'dist/index.js',
+    cwd: '{{ mcp_memory_dir }}',
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+      NODE_ENV: 'production',
+      PORT: {{ mcp_memory_port }}
+    },
+    error_file: '{{ ai_hub_base_path }}/logs/mcp-memory-error.log',
+    out_file: '{{ ai_hub_base_path }}/logs/mcp-memory-out.log',
+    log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+    merge_logs: true
+  }]
+};

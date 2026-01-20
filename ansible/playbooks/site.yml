@@ -1,0 +1,56 @@
+---
+- name: Configure AI Hub v2 - Complete Setup
+  hosts: ai_hub
+  become: yes
+  gather_facts: yes
+
+  pre_tasks:
+    - name: Wait for system to be ready
+      wait_for_connection:
+        timeout: 300
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Display deployment info
+      debug:
+        msg: |
+          Deploying AI Hub v2 to: {{ vm_name }} ({{ ansible_host }})
+          Environment: {{ environment }}
+
+  roles:
+    - base-system          # Docker, Node.js, common tools
+    - claude-cli           # Claude CLI installation
+    - gemini-cli           # Gemini CLI installation
+    - qdrant               # Vector database
+    - sqlite               # SQLite setup for structured data
+    - n8n                  # n8n workflow automation
+    - mcp-proxmox          # Proxmox MCP server (gilby125/mcp-proxmox - 55 tools)
+    - mcp-unifi            # UniFi MCP server (sirkirby/unifi-network-mcp)
+    - mcp-memory           # Custom memory MCP server
+    - document-ingestion   # Initial markdown ingestion
+
+  post_tasks:
+    - name: Display AI Hub status
+      debug:
+        msg: |
+          ========================================
+          AI Hub {{ vm_name }} configured successfully!
+          ========================================
+          Services running:
+            - Claude CLI: Installed
+            - Gemini CLI: Installed
+            - n8n: http://{{ ansible_host }}:5678
+            - Qdrant: http://{{ ansible_host }}:6333
+
+          MCP Servers:
+            - Memory MCP: {{ mcp_servers_path }}/mcp-memory
+            - Proxmox MCP: {{ mcp_servers_path }}/mcp-proxmox
+
+          Next steps:
+            1. Test Claude CLI: ssh {{ ansible_user }}@{{ ansible_host }} && claude
+            2. Access n8n: http://{{ ansible_host }}:5678
+            3. Import n8n workflows
+          ========================================

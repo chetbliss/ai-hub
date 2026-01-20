@@ -1,0 +1,6 @@
+---
+# Ansible Galaxy requirements for AI Hub deployment
+
+collections:
+  - name: community.docker
+    version: ">=3.4.0"

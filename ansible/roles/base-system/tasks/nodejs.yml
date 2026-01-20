@@ -1,0 +1,42 @@
+---
+# Install Node.js
+
+- name: Download NodeSource setup script
+  get_url:
+    url: "https://deb.nodesource.com/setup_{{ nodejs_major_version }}.x"
+    dest: /tmp/nodejs_setup.sh
+    mode: '0755'
+
+- name: Run NodeSource setup script
+  command: bash /tmp/nodejs_setup.sh
+  args:
+    creates: /etc/apt/sources.list.d/nodesource.list
+
+- name: Install Node.js
+  apt:
+    name: nodejs
+    state: present
+    update_cache: yes
+
+- name: Verify Node.js installation
+  command: node --version
+  register: node_version
+  changed_when: false
+
+- name: Verify npm installation
+  command: npm --version
+  register: npm_version
+  changed_when: false
+
+- name: Display Node.js version
+  debug:
+    msg: "Node.js {{ node_version.stdout }}, npm {{ npm_version.stdout }}"
+
+- name: Install global npm packages
+  npm:
+    name: "{{ item }}"
+    global: yes
+    state: present
+  loop:
+    - pm2
+    - typescript

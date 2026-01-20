@@ -1,0 +1,230 @@
+-- AI Hub Memory Database Schema
+-- Created: {{ ansible_date_time.iso8601 }}
+
+-- Core Memory Tables
+
+CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    description TEXT NOT NULL,
+    category TEXT,
+    priority TEXT CHECK(priority IN ('low', 'medium', 'high')) DEFAULT 'medium',
+    status TEXT CHECK(status IN ('pending', 'in_progress', 'completed')) DEFAULT 'pending',
+    due_date TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    description TEXT NOT NULL,
+    category TEXT,
+    remind_at TEXT NOT NULL,
+    repeat_interval TEXT,
+    status TEXT CHECK(status IN ('pending', 'sent', 'cancelled')) DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    sent_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Security+ Quiz Tables
+
+CREATE TABLE IF NOT EXISTS quiz_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain TEXT NOT NULL,
+    subdomain TEXT,
+    question TEXT NOT NULL,
+    option_a TEXT NOT NULL,
+    option_b TEXT NOT NULL,
+    option_c TEXT NOT NULL,
+    option_d TEXT NOT NULL,
+    correct_answer TEXT CHECK(correct_answer IN ('A', 'B', 'C', 'D')) NOT NULL,
+    explanation TEXT,
+    difficulty TEXT CHECK(difficulty IN ('easy', 'medium', 'hard')) DEFAULT 'medium',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS quiz_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_type TEXT CHECK(session_type IN ('random', 'domain_specific', 'weak_areas')) NOT NULL,
+    questions_count INTEGER NOT NULL,
+    correct_count INTEGER DEFAULT 0,
+    started_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS quiz_performance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    question_id INTEGER NOT NULL,
+    user_answer TEXT CHECK(user_answer IN ('A', 'B', 'C', 'D')) NOT NULL,
+    is_correct INTEGER CHECK(is_correct IN (0, 1)) NOT NULL,
+    answered_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (session_id) REFERENCES quiz_sessions(id),
+    FOREIGN KEY (question_id) REFERENCES quiz_questions(id)
+);
+
+-- Code Snippet Tables
+
+CREATE TABLE IF NOT EXISTS code_snippets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    language TEXT NOT NULL,
+    code TEXT NOT NULL,
+    tags TEXT,
+    category TEXT,
+    current_version INTEGER DEFAULT 1,
+    usage_count INTEGER DEFAULT 0,
+    last_used_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS snippet_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snippet_id INTEGER NOT NULL,
+    version_number INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    change_description TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (snippet_id) REFERENCES code_snippets(id),
+    UNIQUE(snippet_id, version_number)
+);
+
+CREATE TABLE IF NOT EXISTS snippet_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snippet_id INTEGER NOT NULL,
+    used_at TEXT DEFAULT (datetime('now')),
+    context TEXT,
+    FOREIGN KEY (snippet_id) REFERENCES code_snippets(id)
+);
+
+-- Troubleshooting Tables
+
+CREATE TABLE IF NOT EXISTS troubleshooting_issues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    system TEXT,
+    category TEXT,
+    severity TEXT CHECK(severity IN ('low', 'medium', 'high', 'critical')) DEFAULT 'medium',
+    status TEXT CHECK(status IN ('open', 'investigating', 'resolved', 'closed')) DEFAULT 'open',
+    error_message TEXT,
+    stack_trace TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    resolved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS issue_solutions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id INTEGER NOT NULL,
+    solution TEXT NOT NULL,
+    steps TEXT,
+    worked INTEGER CHECK(worked IN (0, 1)) DEFAULT 1,
+    time_to_resolve TEXT,
+    notes TEXT,
+    upvotes INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (issue_id) REFERENCES troubleshooting_issues(id)
+);
+
+CREATE TABLE IF NOT EXISTS solution_votes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    solution_id INTEGER NOT NULL,
+    vote_type TEXT CHECK(vote_type IN ('up', 'down')) NOT NULL,
+    voted_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (solution_id) REFERENCES issue_solutions(id)
+);
+
+CREATE TABLE IF NOT EXISTS related_issues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id INTEGER NOT NULL,
+    related_issue_id INTEGER NOT NULL,
+    relationship_type TEXT CHECK(relationship_type IN ('duplicate', 'similar', 'related', 'caused_by')) NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (issue_id) REFERENCES troubleshooting_issues(id),
+    FOREIGN KEY (related_issue_id) REFERENCES troubleshooting_issues(id)
+);
+
+-- News Aggregator Tables
+
+CREATE TABLE IF NOT EXISTS rss_feeds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT UNIQUE NOT NULL,
+    category TEXT,
+    fetch_interval INTEGER DEFAULT 120,
+    last_fetched_at TEXT,
+    is_active INTEGER CHECK(is_active IN (0, 1)) DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS feed_keywords (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feed_id INTEGER NOT NULL,
+    keyword TEXT NOT NULL,
+    priority TEXT CHECK(priority IN ('low', 'medium', 'high', 'critical')) DEFAULT 'medium',
+    alert_enabled INTEGER CHECK(alert_enabled IN (0, 1)) DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (feed_id) REFERENCES rss_feeds(id)
+);
+
+CREATE TABLE IF NOT EXISTS articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feed_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT UNIQUE NOT NULL,
+    content TEXT,
+    summary TEXT,
+    author TEXT,
+    published_at TEXT,
+    fetched_at TEXT DEFAULT (datetime('now')),
+    relevance_score REAL,
+    has_triggered_alert INTEGER CHECK(has_triggered_alert IN (0, 1)) DEFAULT 0,
+    FOREIGN KEY (feed_id) REFERENCES rss_feeds(id)
+);
+
+CREATE TABLE IF NOT EXISTS article_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id INTEGER NOT NULL,
+    tag TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (article_id) REFERENCES articles(id)
+);
+
+CREATE TABLE IF NOT EXISTS saved_articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id INTEGER NOT NULL,
+    notes TEXT,
+    saved_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (article_id) REFERENCES articles(id)
+);
+
+-- Indexes for performance
+
+CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
+CREATE INDEX IF NOT EXISTS idx_todos_category ON todos(category);
+CREATE INDEX IF NOT EXISTS idx_reminders_status ON reminders(status);
+CREATE INDEX IF NOT EXISTS idx_reminders_remind_at ON reminders(remind_at);
+CREATE INDEX IF NOT EXISTS idx_quiz_questions_domain ON quiz_questions(domain);
+CREATE INDEX IF NOT EXISTS idx_quiz_performance_session ON quiz_performance(session_id);
+CREATE INDEX IF NOT EXISTS idx_snippets_language ON code_snippets(language);
+CREATE INDEX IF NOT EXISTS idx_snippets_category ON code_snippets(category);
+CREATE INDEX IF NOT EXISTS idx_issues_status ON troubleshooting_issues(status);
+CREATE INDEX IF NOT EXISTS idx_issues_system ON troubleshooting_issues(system);
+CREATE INDEX IF NOT EXISTS idx_articles_feed ON articles(feed_id);
+CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published_at);
+
+-- Insert default categories
+INSERT OR IGNORE INTO categories (name, description) VALUES
+    ('homelab', 'Homelab infrastructure and services'),
+    ('personal', 'Personal tasks and reminders'),
+    ('work', 'Work-related items'),
+    ('learning', 'Study and certification prep');

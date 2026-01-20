@@ -1,0 +1,5 @@
+---
+# Default variables for claude-cli role
+
+claude_cli_version: latest
+claude_config_dir: "/home/{{ ai_hub_user }}/.config/claude"

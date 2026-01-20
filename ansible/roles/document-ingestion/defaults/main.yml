@@ -1,0 +1,4 @@
+---
+# Default variables for document-ingestion role
+
+ingestion_script_dir: "{{ ai_hub_base_path }}/scripts"

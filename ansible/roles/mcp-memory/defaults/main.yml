@@ -1,0 +1,5 @@
+---
+# Default variables for mcp-memory role
+
+mcp_memory_dir: "{{ mcp_servers_path }}/mcp-memory"
+mcp_memory_port: 3000

@@ -1,0 +1,5 @@
+---
+# Default variables for gemini-cli role
+
+gemini_cli_version: latest
+gemini_config_dir: "/home/{{ ai_hub_user }}/.config/gemini"

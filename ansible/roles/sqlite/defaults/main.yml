@@ -1,0 +1,6 @@
+---
+# Default variables for sqlite role
+
+sqlite_packages:
+  - sqlite3
+  - libsqlite3-dev
