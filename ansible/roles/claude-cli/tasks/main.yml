@@ -56,6 +56,17 @@
     path: "/home/{{ ai_hub_user }}/.claude/settings.local.json"
     state: absent
 
+- name: Export ANTHROPIC_API_KEY in .bashrc
+  lineinfile:
+    path: "/home/{{ ai_hub_user }}/.bashrc"
+    line: 'export ANTHROPIC_API_KEY="{{ anthropic_api_key }}"'
+    state: present
+    create: yes
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+    insertafter: EOF
+
 - name: Add Claude alias to .bashrc for automatic bypass permissions
   lineinfile:
     path: "/home/{{ ai_hub_user }}/.bashrc"
