@@ -1,0 +1,65 @@
+---
+# Deploy Open WebUI Pipelines for Anthropic Claude support
+
+- name: Create Pipelines data directory
+  file:
+    path: "{{ pipelines_data_dir }}"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+
+- name: Pull Pipelines Docker image
+  community.docker.docker_image:
+    name: "ghcr.io/open-webui/pipelines:{{ pipelines_version }}"
+    source: pull
+
+- name: Deploy Pipelines container
+  community.docker.docker_container:
+    name: "{{ pipelines_container_name }}"
+    image: "ghcr.io/open-webui/pipelines:{{ pipelines_version }}"
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "{{ pipelines_port }}:9099"
+    volumes:
+      - "{{ pipelines_data_dir }}:/app/pipelines"
+    env:
+      # Install Anthropic pipeline on startup
+      PIPELINES_URLS: "{{ anthropic_pipeline_url }}"
+
+      # Anthropic API key
+      ANTHROPIC_API_KEY: "{{ anthropic_api_key }}"
+
+      # Pipeline configuration
+      ANTHROPIC_ENABLE_CACHING: "true"
+      ANTHROPIC_SHOW_CACHE_INFO: "true"
+
+      # Timezone
+      TZ: "{{ open_webui_timezone }}"
+    extra_hosts:
+      host.docker.internal: host-gateway
+
+- name: Wait for Pipelines to be ready
+  uri:
+    url: "http://localhost:{{ pipelines_port }}"
+    status_code: [200, 404]
+  register: result
+  until: result.status in [200, 404]
+  retries: 30
+  delay: 2
+
+- name: Display Pipelines status
+  debug:
+    msg: |
+      Open WebUI Pipelines deployed successfully:
+        - Pipelines API: http://{{ ansible_host }}:{{ pipelines_port }}
+        - Anthropic Claude: Enabled
+        - Data directory: {{ pipelines_data_dir }}
+
+      Next steps:
+        1. In Open WebUI, go to Admin Panel > Settings > Connections
+        2. Click + to add connection
+        3. Set API URL: http://host.docker.internal:{{ pipelines_port }}
+        4. Set API Key: 0p3n-w3bu!
+        5. Claude models will appear in model selector

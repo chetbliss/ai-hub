@@ -1,0 +1,10 @@
+---
+# Open WebUI Pipelines defaults
+
+pipelines_version: main
+pipelines_container_name: open-webui-pipelines
+pipelines_port: 9099
+pipelines_data_dir: "{{ ai_hub_base_path }}/open-webui-pipelines"
+
+# Anthropic pipeline URL
+anthropic_pipeline_url: "https://openwebui.com/f/christiant/anthropic/download"

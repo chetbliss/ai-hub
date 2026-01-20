@@ -28,6 +28,7 @@
     - sqlite               # SQLite setup for structured data
     - n8n                  # n8n workflow automation
     - open-webui           # Open WebUI chat interface
+    - open-webui-pipelines # Pipelines for Claude/Anthropic support
     - mcp-proxmox          # Proxmox MCP server (gilby125/mcp-proxmox - 55 tools)
     - mcp-unifi            # UniFi MCP server (sirkirby/unifi-network-mcp)
     - mcp-memory           # Custom memory MCP server
@@ -43,7 +44,8 @@
           Services running:
             - Claude CLI: Installed
             - Gemini CLI: Installed
-            - Open WebUI: http://{{ ansible_host }}:3000 (Web chat interface)
+            - Open WebUI: http://{{ ansible_host }}:3000 (Web chat interface with Claude)
+            - Open WebUI Pipelines: http://{{ ansible_host }}:9099 (Claude/Anthropic support)
             - n8n: http://{{ ansible_host }}:5678
             - Qdrant: http://{{ ansible_host }}:6333
 
