@@ -33,12 +33,8 @@
     volumes:
       - "{{ open_webui_data_dir }}:/app/backend/data"
     env:
-      # OpenAI API configuration (for Claude via Anthropic's OpenAI-compatible endpoint)
-      OPENAI_API_BASE_URL: "https://api.anthropic.com/v1"
-      OPENAI_API_KEY: "{{ anthropic_api_key }}"
-
-      # Alternative: Direct OpenAI if user wants GPT
-      # OPENAI_API_KEY: "{{ openai_api_key }}"
+      # OpenAI API configuration
+      OPENAI_API_KEY: "{{ openai_api_key }}"
 
       # Authentication settings
       ENABLE_SIGNUP: "{{ open_webui_enable_signup | string | lower }}"
@@ -72,7 +68,7 @@
         - First time access: Create admin account
         - Authentication: Email + password (signup disabled for others)
         - Data directory: {{ open_webui_data_dir }}
-        - Model: Claude via Anthropic API
+        - Models: GPT-4, GPT-3.5 via OpenAI API
 
       Next steps:
         1. Access http://{{ ansible_host }}:{{ open_webui_port }}
