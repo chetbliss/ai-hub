@@ -1,0 +1,16 @@
+---
+# Open WebUI defaults
+
+open_webui_version: latest
+open_webui_container_name: open-webui
+open_webui_port: 3000
+open_webui_data_dir: "{{ ai_hub_base_path }}/open-webui"
+open_webui_timezone: America/New_York
+
+# Authentication
+open_webui_enable_signup: false  # Disable public signup
+open_webui_default_user_role: user
+
+# Model configuration
+open_webui_enable_ollama: false  # We're using Claude API, not Ollama
+open_webui_enable_openai: true

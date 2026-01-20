@@ -1,0 +1,80 @@
+---
+# Deploy Open WebUI for AI Hub web interface
+
+- name: Create Open WebUI data directory
+  file:
+    path: "{{ open_webui_data_dir }}"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+
+- name: Create Open WebUI config directory
+  file:
+    path: "{{ open_webui_data_dir }}/config"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+
+- name: Pull Open WebUI Docker image
+  community.docker.docker_image:
+    name: "ghcr.io/open-webui/open-webui:{{ open_webui_version }}"
+    source: pull
+
+- name: Deploy Open WebUI container
+  community.docker.docker_container:
+    name: "{{ open_webui_container_name }}"
+    image: "ghcr.io/open-webui/open-webui:{{ open_webui_version }}"
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "{{ open_webui_port }}:8080"
+    volumes:
+      - "{{ open_webui_data_dir }}:/app/backend/data"
+    env:
+      # OpenAI API configuration (for Claude via Anthropic's OpenAI-compatible endpoint)
+      OPENAI_API_BASE_URL: "https://api.anthropic.com/v1"
+      OPENAI_API_KEY: "{{ anthropic_api_key }}"
+
+      # Alternative: Direct OpenAI if user wants GPT
+      # OPENAI_API_KEY: "{{ openai_api_key }}"
+
+      # Authentication settings
+      ENABLE_SIGNUP: "{{ open_webui_enable_signup | string | lower }}"
+      DEFAULT_USER_ROLE: "{{ open_webui_default_user_role }}"
+
+      # Features
+      ENABLE_OLLAMA_API: "{{ open_webui_enable_ollama | string | lower }}"
+      ENABLE_OPENAI_API: "{{ open_webui_enable_openai | string | lower }}"
+
+      # General settings
+      WEBUI_NAME: "AI Hub"
+      WEBUI_URL: "http://{{ ansible_host }}:{{ open_webui_port }}"
+
+      # Timezone
+      TZ: "{{ open_webui_timezone }}"
+
+- name: Wait for Open WebUI to be ready
+  uri:
+    url: "http://localhost:{{ open_webui_port }}"
+    status_code: [200, 302]
+  register: result
+  until: result.status in [200, 302]
+  retries: 30
+  delay: 2
+
+- name: Display Open WebUI status
+  debug:
+    msg: |
+      Open WebUI deployed successfully:
+        - Web UI: http://{{ ansible_host }}:{{ open_webui_port }}
+        - First time access: Create admin account
+        - Authentication: Email + password (signup disabled for others)
+        - Data directory: {{ open_webui_data_dir }}
+        - Model: Claude via Anthropic API
+
+      Next steps:
+        1. Access http://{{ ansible_host }}:{{ open_webui_port }}
+        2. Create admin account on first visit
+        3. Configure MCP servers in Settings > Connections
