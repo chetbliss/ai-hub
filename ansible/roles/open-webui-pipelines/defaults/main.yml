@@ -6,5 +6,5 @@ pipelines_container_name: open-webui-pipelines
 pipelines_port: 9099
 pipelines_data_dir: "{{ ai_hub_base_path }}/open-webui-pipelines"
 
-# Anthropic pipeline URL
-anthropic_pipeline_url: "https://openwebui.com/f/christiant/anthropic/download"
+# Anthropic pipeline URL (official Open WebUI pipelines repository)
+anthropic_pipeline_url: "https://raw.githubusercontent.com/open-webui/pipelines/main/examples/pipelines/providers/anthropic_manifold_pipeline.py"
