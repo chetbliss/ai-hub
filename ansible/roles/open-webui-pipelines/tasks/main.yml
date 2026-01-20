@@ -37,7 +37,7 @@
 
       # Timezone
       TZ: "{{ open_webui_timezone }}"
-    extra_hosts:
+    etc_hosts:
       host.docker.internal: host-gateway
 
 - name: Wait for Pipelines to be ready
