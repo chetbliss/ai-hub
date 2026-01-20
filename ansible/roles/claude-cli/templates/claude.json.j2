@@ -1,0 +1,58 @@
+{
+  "numStartups": 1,
+  "customApiKeyResponses": {
+    "approved": [],
+    "rejected": []
+  },
+  "bypassPermissionsAccepted": true,
+  "hasCompletedOnboarding": true,
+  "projects": {
+    "/home/{{ ai_hub_user }}": {
+      "allowedTools": [],
+      "mcpContextUris": [],
+      "mcpServers": {
+        "memory": {
+          "command": "node",
+          "args": ["{{ mcp_servers_path }}/mcp-memory/dist/index.js"],
+          "env": {
+            "OPENAI_API_KEY": "{{ openai_api_key }}",
+            "QDRANT_URL": "{{ qdrant_url }}",
+            "DB_PATH": "{{ sqlite_db_path }}"
+          }
+        },
+        "proxmox": {
+          "command": "node",
+          "args": ["{{ mcp_servers_path }}/mcp-proxmox/index.js"],
+          "env": {
+            "PROXMOX_HOST": "{{ proxmox_host }}",
+            "PROXMOX_USER": "{{ proxmox_user }}",
+            "PROXMOX_TOKEN_NAME": "{{ proxmox_token_name }}",
+            "PROXMOX_TOKEN_VALUE": "{{ proxmox_token_value }}",
+            "PROXMOX_ALLOW_ELEVATED": "{{ proxmox_allow_elevated }}",
+            "PROXMOX_PORT": "{{ proxmox_port }}"
+          }
+        }
+      },
+      "enabledMcpjsonServers": [],
+      "disabledMcpjsonServers": [],
+      "hasTrustDialogAccepted": true,
+      "bypassPermissionsAccepted": true,
+      "projectOnboardingSeenCount": 1,
+      "hasClaudeMdExternalIncludesApproved": false,
+      "hasClaudeMdExternalIncludesWarningShown": false,
+      "exampleFiles": [],
+      "reactVulnerabilityCache": {
+        "detected": false,
+        "package": null,
+        "packageName": null,
+        "version": null,
+        "packageManager": null
+      }
+    }
+  },
+  "userID": "automated-deployment",
+  "firstStartTime": "{{ ansible_date_time.iso8601 }}",
+  "hasShownOpus45Notice": {},
+  "officialMarketplaceAutoInstallAttempted": true,
+  "officialMarketplaceAutoInstalled": true
+}

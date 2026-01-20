@@ -34,3 +34,35 @@
 - name: Display Claude CLI version
   debug:
     msg: "Claude CLI installed: {{ claude_version.stdout if claude_version.rc == 0 else 'Installation completed' }}"
+
+- name: Create .claude directory in user home
+  file:
+    path: "/home/{{ ai_hub_user }}/.claude"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0700'
+
+- name: Configure Claude with bypass permissions and MCP servers
+  template:
+    src: claude.json.j2
+    dest: "/home/{{ ai_hub_user }}/.claude.json"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+
+- name: Remove settings.local.json if it exists (causes permission issues)
+  file:
+    path: "/home/{{ ai_hub_user }}/.claude/settings.local.json"
+    state: absent
+
+- name: Add Claude alias to .bashrc for automatic bypass permissions
+  lineinfile:
+    path: "/home/{{ ai_hub_user }}/.bashrc"
+    line: 'alias claude="claude --permission-mode bypassPermissions"'
+    state: present
+    create: yes
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+    insertafter: EOF
