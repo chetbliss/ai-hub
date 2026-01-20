@@ -11,6 +11,17 @@
 # Environment files
 .env
 *.env
+**/secrets/
+**/tokens/
+
+# API Keys and Tokens (DO NOT COMMIT)
+**/telegram_token*
+**/bot_token*
+**/*secret*.yml
+**/*secret*.yaml
+**/*token*.txt
+**/credentials.json
+**/api_keys.yml
 
 # IDE
 .vscode/
