@@ -9,6 +9,14 @@
     group: "{{ ai_hub_user }}"
     mode: '0755'
 
+- name: Copy custom Anthropic pipeline with updated model IDs
+  copy:
+    src: anthropic_manifold_pipeline.py
+    dest: "{{ pipelines_data_dir }}/anthropic_manifold_pipeline.py"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+
 - name: Pull Pipelines Docker image
   community.docker.docker_image:
     name: "ghcr.io/open-webui/pipelines:{{ pipelines_version }}"
@@ -25,9 +33,6 @@
     volumes:
       - "{{ pipelines_data_dir }}:/app/pipelines"
     env:
-      # Install Anthropic pipeline on startup
-      PIPELINES_URLS: "{{ anthropic_pipeline_url }}"
-
       # Anthropic API key
       ANTHROPIC_API_KEY: "{{ anthropic_api_key }}"
 
