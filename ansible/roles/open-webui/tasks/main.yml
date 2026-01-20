@@ -37,8 +37,8 @@
       OPENAI_API_KEY: "{{ openai_api_key }}"
 
       # Pipelines configuration for Claude/Anthropic
-      OPENAI_API_BASE_URLS: "http://host.docker.internal:9099;https://api.openai.com/v1"
-      OPENAI_API_KEYS: "0p3n-w3bu!;{{ openai_api_key }}"
+      OPENAI_API_BASE_URLS: "http://host.docker.internal:9099;https://api.openai.com/v1;http://host.docker.internal:8000"
+      OPENAI_API_KEYS: "0p3n-w3bu!;{{ openai_api_key }};ai-hub-mcp-proxy-2026"
 
       # Authentication settings
       ENABLE_SIGNUP: "{{ open_webui_enable_signup | string | lower }}"
@@ -75,8 +75,9 @@
         - Authentication: Email + password (signup disabled for others)
         - Data directory: {{ open_webui_data_dir }}
         - Models: Claude (via Pipelines) + GPT (via OpenAI API)
+        - MCP Tools: 34 tools accessible via web (news, Proxmox, UniFi, memory)
 
       Next steps:
         1. Access http://{{ ansible_host }}:{{ open_webui_port }}
         2. Create admin account on first visit
-        3. Select Claude or GPT models from model dropdown
+        3. Use Claude/GPT models with 34 MCP tools - NO SSH NEEDED

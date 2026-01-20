@@ -32,6 +32,7 @@
     - mcp-proxmox          # Proxmox MCP server (gilby125/mcp-proxmox - 55 tools)
     - mcp-unifi            # UniFi MCP server (sirkirby/unifi-network-mcp)
     - mcp-memory           # Custom memory MCP server
+    - mcpo                 # MCP-to-OpenAPI proxy for Open WebUI access to MCP tools
     - document-ingestion   # Initial markdown ingestion
 
   post_tasks:
@@ -44,18 +45,20 @@
           Services running:
             - Claude CLI: Installed
             - Gemini CLI: Installed
-            - Open WebUI: http://{{ ansible_host }}:3000 (Web chat interface with Claude)
+            - Open WebUI: http://{{ ansible_host }}:3000 (Web chat with Claude + 34 MCP tools)
             - Open WebUI Pipelines: http://{{ ansible_host }}:9099 (Claude/Anthropic support)
+            - mcpo (MCP Proxy): http://{{ ansible_host }}:8000 (Exposes MCP tools to web)
             - n8n: http://{{ ansible_host }}:5678
             - Qdrant: http://{{ ansible_host }}:6333
 
-          MCP Servers (34 tools total):
-            - Memory MCP: {{ mcp_servers_path }}/mcp-memory
-            - Proxmox MCP: {{ mcp_servers_path }}/mcp-proxmox
-            - UniFi MCP: {{ mcp_servers_path }}/unifi-network-mcp
+          MCP Tools (34 tools - accessible via web, NO SSH NEEDED):
+            - Memory/Knowledge: 16 tools (quiz, snippets, issues, search)
+            - News Aggregator: 9 tools (RSS feeds, trending, summaries)
+            - Proxmox: 55 tools (VM management, storage, networking)
+            - UniFi: Tools for network management
 
           Next steps:
-            1. Access Open WebUI: http://{{ ansible_host }}:3000 (Create admin account)
-            2. Test Claude CLI: ssh {{ ansible_user }}@{{ ansible_host }} && claude
-            3. Access n8n: http://{{ ansible_host }}:5678
+            1. Access Open WebUI: http://{{ ansible_host }}:3000
+            2. Create admin account
+            3. Use Claude with MCP tools via web browser - NO SSH REQUIRED
           ========================================

@@ -1,0 +1,43 @@
+---
+# Deploy mcpo - MCP to OpenAPI proxy for Open WebUI
+
+- name: Install mcpo via pip in virtual environment
+  pip:
+    name: mcpo
+    virtualenv: "{{ ai_hub_base_path }}/venvs/mcpo"
+    virtualenv_command: python3 -m venv
+
+- name: Create PM2 ecosystem file for mcpo
+  template:
+    src: mcpo-ecosystem.config.cjs.j2
+    dest: "{{ ai_hub_base_path }}/config/mcpo-ecosystem.config.cjs"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+
+- name: Stop existing mcpo PM2 process (if any)
+  command: pm2 delete {{ mcpo_service_name }}
+  become_user: "{{ ai_hub_user }}"
+  ignore_errors: yes
+
+- name: Start mcpo with PM2
+  command: pm2 start {{ ai_hub_base_path }}/config/mcpo-ecosystem.config.cjs
+  become_user: "{{ ai_hub_user }}"
+  environment:
+    PATH: "/usr/local/bin:/usr/bin:/bin:{{ ansible_env.HOME }}/.local/bin"
+
+- name: Save PM2 configuration
+  command: pm2 save
+  become_user: "{{ ai_hub_user }}"
+
+- name: Display mcpo status
+  debug:
+    msg: |
+      mcpo (MCP-to-OpenAPI proxy) deployed:
+        - Port: {{ mcpo_port }}
+        - API Key: {{ mcpo_api_key }}
+        - Exposing: MCP Memory Server (34 tools)
+        - OpenAPI docs: http://{{ ansible_host }}:{{ mcpo_port }}/docs
+        - Status: pm2 status
+
+      Open WebUI will auto-connect to this proxy for MCP tools.

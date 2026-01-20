@@ -1,0 +1,9 @@
+---
+# mcpo defaults - MCP to OpenAPI proxy
+
+mcpo_port: 8000
+mcpo_api_key: "ai-hub-mcp-proxy-2026"
+mcpo_service_name: mcpo-mcp-memory
+
+# MCP Memory server path
+mcp_memory_server_path: "{{ mcp_servers_path }}/mcp-memory/dist/index.js"

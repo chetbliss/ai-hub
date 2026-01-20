@@ -1,0 +1,27 @@
+module.exports = {
+  apps: [{
+    name: '{{ mcpo_service_name }}',
+    script: '{{ ai_hub_base_path }}/venvs/mcpo/bin/mcpo',
+    args: [
+      '--port', '{{ mcpo_port }}',
+      '--api-key', '{{ mcpo_api_key }}',
+      '--',
+      'node',
+      '{{ mcp_memory_server_path }}'
+    ].join(' '),
+    cwd: '{{ ai_hub_base_path }}',
+    env: {
+      OPENAI_API_KEY: '{{ openai_api_key }}',
+      QDRANT_URL: 'http://localhost:6333',
+      SQLITE_DB: '{{ ai_hub_base_path }}/data/memory.db',
+      NODE_ENV: 'production'
+    },
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '500M',
+    error_file: '{{ ai_hub_base_path }}/logs/mcpo-error.log',
+    out_file: '{{ ai_hub_base_path }}/logs/mcpo-out.log',
+    log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
+  }]
+};
