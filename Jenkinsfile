@@ -3,9 +3,9 @@ pipeline {
 
     environment {
         // AI Hub deployment settings based on branch
-        AI_HUB_INVENTORY = "${env.BRANCH_NAME == 'main' ? 'prod.yml' : 'dev.yml'}"
-        AI_HUB_TARGET = "${env.BRANCH_NAME == 'main' ? '10.10.10.50 (ai-hub PROD)' : '10.10.10.51 (ai-hub-dev DEV)'}"
-        AI_HUB_ENV = "${env.BRANCH_NAME == 'main' ? 'production' : 'development'}"
+        AI_HUB_INVENTORY = "${env.BRANCH_NAME == 'main' ? 'prod.yml' : (env.BRANCH_NAME == 'test' ? 'test.yml' : 'dev.yml')}"
+        AI_HUB_TARGET = "${env.BRANCH_NAME == 'main' ? '10.10.10.50 (ai-hub PROD)' : (env.BRANCH_NAME == 'test' ? '10.10.10.55 (ai-hub-test TEST)' : '10.10.10.51 (ai-hub-dev DEV)')}"
+        AI_HUB_ENV = "${env.BRANCH_NAME == 'main' ? 'production' : (env.BRANCH_NAME == 'test' ? 'test' : 'development')}"
 
         // Terraform credentials (injected as TF_VAR_ environment variables)
         TF_VAR_proxmox_api_token = credentials('proxmox-api-token')
@@ -32,8 +32,8 @@ pipeline {
                 script {
                     echo "Checking if AI Hub VM needs provisioning..."
 
-                    def targetHost = env.AI_HUB_INVENTORY == 'prod.yml' ? '10.10.10.50' : '10.10.10.51'
-                    def tfvarFile = env.AI_HUB_INVENTORY == 'prod.yml' ? 'prod.tfvars' : 'dev.tfvars'
+                    def targetHost = env.AI_HUB_INVENTORY == 'prod.yml' ? '10.10.10.50' : (env.AI_HUB_INVENTORY == 'test.yml' ? '10.10.10.55' : '10.10.10.51')
+                    def tfvarFile = env.AI_HUB_INVENTORY == 'prod.yml' ? 'prod.tfvars' : (env.AI_HUB_INVENTORY == 'test.yml' ? 'test.tfvars' : 'dev.tfvars')
 
                     // Check if VM is reachable
                     def vmExists = sh(
@@ -116,7 +116,7 @@ pipeline {
                 script {
                     echo "Verifying AI Hub deployment..."
 
-                    def targetHost = env.AI_HUB_INVENTORY == 'prod.yml' ? '10.10.10.50' : '10.10.10.51'
+                    def targetHost = env.AI_HUB_INVENTORY == 'prod.yml' ? '10.10.10.50' : (env.AI_HUB_INVENTORY == 'test.yml' ? '10.10.10.55' : '10.10.10.51')
 
                     sh """
                         # Check Qdrant
