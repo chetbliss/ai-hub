@@ -8,7 +8,7 @@ open_webui_data_dir: "{{ ai_hub_base_path }}/open-webui"
 open_webui_timezone: America/New_York
 
 # Authentication
-open_webui_enable_signup: false  # Disable public signup
+open_webui_enable_signup: true  # Enable signup for first admin user creation
 open_webui_default_user_role: user
 
 # Model configuration
