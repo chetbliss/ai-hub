@@ -36,6 +36,10 @@
       # OpenAI API configuration
       OPENAI_API_KEY: "{{ openai_api_key }}"
 
+      # Pipelines configuration for Claude/Anthropic
+      OPENAI_API_BASE_URLS: "http://host.docker.internal:9099;https://api.openai.com/v1"
+      OPENAI_API_KEYS: "0p3n-w3bu!;{{ openai_api_key }}"
+
       # Authentication settings
       ENABLE_SIGNUP: "{{ open_webui_enable_signup | string | lower }}"
       DEFAULT_USER_ROLE: "{{ open_webui_default_user_role }}"
@@ -50,6 +54,8 @@
 
       # Timezone
       TZ: "{{ open_webui_timezone }}"
+    etc_hosts:
+      host.docker.internal: host-gateway
 
 - name: Wait for Open WebUI to be ready
   uri:
@@ -68,9 +74,9 @@
         - First time access: Create admin account
         - Authentication: Email + password (signup disabled for others)
         - Data directory: {{ open_webui_data_dir }}
-        - Models: GPT-4, GPT-3.5 via OpenAI API
+        - Models: Claude (via Pipelines) + GPT (via OpenAI API)
 
       Next steps:
         1. Access http://{{ ansible_host }}:{{ open_webui_port }}
         2. Create admin account on first visit
-        3. Configure MCP servers in Settings > Connections
+        3. Select Claude or GPT models from model dropdown
