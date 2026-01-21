@@ -19,14 +19,14 @@ AI Hub v2 is a comprehensive "second brain" system that combines:
 ## Architecture
 
 ```
-User → Slack/Telegram → n8n → Claude API
-                                   ↓
-                  ┌────────────────┴───────────────┐
-                  ↓                                ↓
-          Memory MCP Server                Infrastructure MCPs
-          ├─ Qdrant (semantic search)      ├─ Proxmox (live stats)
-          ├─ SQLite (todos/reminders)      └─ UniFi (network)
-          └─ Document ingestion
+User → Telegram → telegram-claude-bot (polling) → Claude CLI
+                                                       ↓
+                                      ┌────────────────┴───────────────┐
+                                      ↓                                ↓
+                              Memory MCP Server                Infrastructure MCPs
+                              ├─ Qdrant (semantic search)      ├─ Proxmox (live stats)
+                              ├─ SQLite (todos/reminders)      └─ UniFi (network)
+                              └─ Document ingestion
 ```
 
 ---
@@ -53,9 +53,14 @@ User → Slack/Telegram → n8n → Claude API
 - 9 tools: search, store, todos, reminders
 - Integrates with Claude CLI automatically
 
+### Telegram Bot (Native)
+- Python service with long polling
+- Chat ID whitelist for security
+- Prometheus metrics on port 9120
+- See [Telegram Claude Bot docs](./docs/TELEGRAM-CLAUDE-BOT.md)
+
 ### Automation (n8n)
 - Slack bot workflow
-- Telegram bot workflow
 - Daily document sync
 
 ---
@@ -142,23 +147,26 @@ claude where is pihole running?
 ## Development Status
 
 - [x] Directory structure created
-- [ ] Terraform configs
-- [ ] Ansible playbooks
+- [x] Terraform configs
+- [x] Ansible playbooks
+- [x] Jenkinsfile & CI/CD
+- [x] Claude CLI installation
+- [x] Telegram Claude Bot (native polling)
+- [x] Prometheus metrics & Grafana dashboard
+- [x] n8n deployment
 - [ ] Memory MCP server
-- [ ] Docker compose
-- [ ] n8n workflows
-- [ ] Jenkinsfile
-- [ ] Initial testing
+- [ ] Slack bot workflow
 
 ---
 
 ## Documentation
 
+- [Telegram Claude Bot](./docs/TELEGRAM-CLAUDE-BOT.md) - Native polling bot with Prometheus metrics
 - [AI Hub v1 Setup](../homelab-migration/ai-hub-setup.md)
 - [Deployment Guide](./docs/DEPLOYMENT.md) (TODO)
 - [MCP Server Development](./docs/MCP-DEVELOPMENT.md) (TODO)
 
 ---
 
-**Last Updated:** 2026-01-19
-**Next Steps:** Create Terraform configuration
+**Last Updated:** 2026-01-21
+**Next Steps:** Memory MCP server implementation
