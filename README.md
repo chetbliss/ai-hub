@@ -57,7 +57,7 @@ User → Telegram → telegram-claude-bot (polling) → Claude CLI
 - Python service with long polling
 - Chat ID whitelist for security
 - Prometheus metrics on port 9120
-- See [Telegram Claude Bot docs](./docs/TELEGRAM-CLAUDE-BOT.md)
+- Grafana dashboard: https://grafana.lab.chettv.com
 
 ### Automation (n8n)
 - Slack bot workflow
@@ -161,10 +161,8 @@ claude where is pihole running?
 
 ## Documentation
 
-- [Telegram Claude Bot](./docs/TELEGRAM-CLAUDE-BOT.md) - Native polling bot with Prometheus metrics
 - [AI Hub v1 Setup](../homelab-migration/ai-hub-setup.md)
-- [Deployment Guide](./docs/DEPLOYMENT.md) (TODO)
-- [MCP Server Development](./docs/MCP-DEVELOPMENT.md) (TODO)
+- Session docs in `chettv-lab/deployments/ai-hub/`
 
 ---
 
