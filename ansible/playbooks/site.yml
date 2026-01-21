@@ -34,6 +34,7 @@
     - mcp-memory           # Custom memory MCP server
     - mcpo                 # MCP-to-OpenAPI proxy for Open WebUI access to MCP tools
     - document-ingestion   # Initial markdown ingestion
+    - telegram-claude-bot  # Telegram bot for Claude CLI access
 
   post_tasks:
     - name: Display AI Hub status
@@ -45,6 +46,7 @@
           Services running:
             - Claude CLI: Installed
             - Gemini CLI: Installed
+            - Telegram Bot: @chettvbot (Metrics: http://{{ ansible_host }}:9120/metrics)
             - Open WebUI: http://{{ ansible_host }}:3000 (Web chat with Claude + 34 MCP tools)
             - Open WebUI Pipelines: http://{{ ansible_host }}:9099 (Claude/Anthropic support)
             - mcpo (MCP Proxy): http://{{ ansible_host }}:8000 (Exposes MCP tools to web)

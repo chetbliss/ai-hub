@@ -1,0 +1,6 @@
+---
+- name: restart telegram-claude-bot
+  systemd:
+    name: telegram-claude-bot
+    state: restarted
+    daemon_reload: yes

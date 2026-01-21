@@ -1,0 +1,22 @@
+---
+# Telegram Claude Bot configuration
+
+# Telegram settings
+telegram_bot_token: "{{ lookup('env', 'TELEGRAM_BOT_TOKEN') }}"
+telegram_allowed_chat_ids:
+  - 8355680407  # Chet's chat ID
+telegram_poll_timeout: 60
+
+# Prometheus metrics
+telegram_metrics_port: 9120
+
+# Apprise alerts (optional)
+apprise_url: "http://localhost:8000/notify/apprise"
+
+# Claude CLI
+claude_command: "/usr/bin/claude"
+
+# Installation paths
+telegram_bot_install_dir: "{{ ai_hub_base_path }}/telegram-claude-bot"
+telegram_bot_script_path: "{{ telegram_bot_install_dir }}/telegram_claude_bot.py"
+telegram_bot_venv: "{{ telegram_bot_install_dir }}/venv"

@@ -1,0 +1,36 @@
+[Unit]
+Description=Telegram Claude Bot
+Documentation=https://github.com/chetbliss/ai-hub
+After=network.target
+
+[Service]
+Type=simple
+User={{ ai_hub_user }}
+Group={{ ai_hub_user }}
+WorkingDirectory=/home/{{ ai_hub_user }}
+ExecStart={{ telegram_bot_venv }}/bin/python {{ telegram_bot_script_path }}
+Restart=always
+RestartSec=10
+
+# Environment
+Environment=HOME=/home/{{ ai_hub_user }}
+Environment=TELEGRAM_BOT_TOKEN={{ telegram_bot_token }}
+Environment=POLL_TIMEOUT={{ telegram_poll_timeout }}
+Environment=METRICS_PORT={{ telegram_metrics_port }}
+Environment=APPRISE_URL={{ apprise_url }}
+Environment=CLAUDE_COMMAND={{ claude_command }}
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/{{ ai_hub_user }}/.claude
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=telegram-claude-bot
+
+[Install]
+WantedBy=multi-user.target

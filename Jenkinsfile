@@ -166,7 +166,7 @@ pipeline {
                 echo "  - Qdrant (vector database)"
                 echo "  - SQLite (memory database)"
                 echo "  - n8n (workflow automation)"
-                echo "  - Telegram Claude Bot workflow"
+                echo "  - Telegram Claude Bot (@chettvbot, metrics port 9120)"
                 echo "  - MCP Memory Server"
                 echo "  - MCP Proxmox Server"
                 echo "  - MCP UniFi Server"
