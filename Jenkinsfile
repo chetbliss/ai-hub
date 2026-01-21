@@ -82,6 +82,7 @@ pipeline {
                         string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY'),
                         string(credentialsId: 'proxmox-api-token', variable: 'PROXMOX_API_TOKEN'),
                         string(credentialsId: 'unifi-controller-password', variable: 'UNIFI_PASSWORD'),
+                        string(credentialsId: 'unifi-controller-username', variable: 'UNIFI_USERNAME'),
                         usernamePassword(credentialsId: 'github-token-chetbliss', usernameVariable: 'GITHUB_USERNAME', passwordVariable: 'GITHUB_TOKEN')
                     ]) {
                         sh """
@@ -98,6 +99,7 @@ pipeline {
                             export GEMINI_API_KEY="${GEMINI_API_KEY}"
                             export OPENAI_API_KEY="${OPENAI_API_KEY}"
                             export UNIFI_PASSWORD="${UNIFI_PASSWORD}"
+                            export UNIFI_USERNAME="${UNIFI_USERNAME}"
                             export GITHUB_USERNAME="${GITHUB_USERNAME}"
                             export GITHUB_TOKEN="${GITHUB_TOKEN}"
 
