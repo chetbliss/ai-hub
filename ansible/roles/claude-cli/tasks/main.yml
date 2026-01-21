@@ -43,10 +43,18 @@
     group: "{{ ai_hub_user }}"
     mode: '0700'
 
-- name: Configure Claude with bypass permissions and MCP servers
+- name: Configure Claude with lean config (MCP Memory only - cheaper)
   template:
-    src: claude.json.j2
+    src: claude-lean.json.j2
     dest: "/home/{{ ai_hub_user }}/.claude.json"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+
+- name: Configure Claude full config (all MCP servers - for /infra commands)
+  template:
+    src: claude-full.json.j2
+    dest: "/home/{{ ai_hub_user }}/.claude-full.json"
     owner: "{{ ai_hub_user }}"
     group: "{{ ai_hub_user }}"
     mode: '0600'

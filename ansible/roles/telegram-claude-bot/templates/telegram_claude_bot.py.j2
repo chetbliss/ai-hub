@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
 Telegram Claude Bot - Polls Telegram for messages and responds via Claude CLI.
+
+Supports two modes:
+- Default (lean): Uses MCP Memory only (~2 cents/query)
+- Infrastructure (/infra prefix): Uses all MCP servers including Proxmox/UniFi (~7 cents/query)
 """
 
 import os
@@ -10,7 +14,8 @@ import signal
 import subprocess
 import logging
 import threading
-from typing import Set
+import shutil
+from typing import Set, Tuple
 import requests
 
 from prometheus_client import start_http_server, Counter, Histogram, Gauge
@@ -22,6 +27,14 @@ METRICS_PORT = int(os.environ.get('METRICS_PORT', '{{ telegram_metrics_port }}')
 APPRISE_URL = os.environ.get('APPRISE_URL', '{{ apprise_url }}')
 CLAUDE_COMMAND = os.environ.get('CLAUDE_COMMAND', '{{ claude_command }}')
 
+# Config paths for lean vs full mode
+HOME_DIR = os.path.expanduser('~')
+CLAUDE_CONFIG_LEAN = os.path.join(HOME_DIR, '.claude.json')
+CLAUDE_CONFIG_FULL = os.path.join(HOME_DIR, '.claude-full.json')
+
+# Lock for config swapping (prevents race conditions)
+config_lock = threading.Lock()
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -30,9 +43,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MESSAGES_RECEIVED = Counter('telegram_messages_received_total', 'Total messages received', ['chat_id', 'authorized'])
-MESSAGES_PROCESSED = Counter('telegram_messages_processed_total', 'Total messages processed successfully')
+MESSAGES_PROCESSED = Counter('telegram_messages_processed_total', 'Total messages processed successfully', ['mode'])
 MESSAGES_FAILED = Counter('telegram_messages_failed_total', 'Total messages that failed processing')
-RESPONSE_TIME = Histogram('telegram_response_seconds', 'Time to process and respond', buckets=[1, 5, 10, 30, 60, 120, 300])
+RESPONSE_TIME = Histogram('telegram_response_seconds', 'Time to process and respond', ['mode'], buckets=[1, 5, 10, 30, 60, 120, 300])
 LAST_POLL_TIME = Gauge('telegram_last_poll_timestamp', 'Timestamp of last successful poll')
 BOT_UP = Gauge('telegram_bot_up', 'Bot is running')
 
@@ -91,18 +104,41 @@ def send_message(chat_id: int, text: str, parse_mode: str = None) -> bool:
             return False
 
 
-def run_claude(prompt: str) -> str:
-    """Run Claude CLI with the given prompt via stdin."""
+def run_claude(prompt: str, use_full: bool = False) -> str:
+    """Run Claude CLI with the given prompt via stdin.
+
+    Args:
+        prompt: The user's message
+        use_full: If True, use full config with all MCP servers (Proxmox, UniFi, Memory)
+                  If False, use lean config with just MCP Memory (cheaper)
+    """
     try:
-        result = subprocess.run(
-            [CLAUDE_COMMAND, '--print'],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=300,
-            cwd=os.path.expanduser('~'),
-            env={**os.environ, 'HOME': os.path.expanduser('~')}
-        )
+        # If using full config, temporarily swap configs
+        if use_full and os.path.exists(CLAUDE_CONFIG_FULL):
+            with config_lock:
+                # Backup lean config
+                shutil.copy2(CLAUDE_CONFIG_LEAN, CLAUDE_CONFIG_LEAN + '.bak')
+                # Copy full config to active location
+                shutil.copy2(CLAUDE_CONFIG_FULL, CLAUDE_CONFIG_LEAN)
+                logger.info("Switched to FULL config (Proxmox + UniFi + Memory)")
+
+        try:
+            result = subprocess.run(
+                [CLAUDE_COMMAND, '--print'],
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=HOME_DIR,
+                env={**os.environ, 'HOME': HOME_DIR}
+            )
+        finally:
+            # Restore lean config if we swapped
+            if use_full and os.path.exists(CLAUDE_CONFIG_LEAN + '.bak'):
+                with config_lock:
+                    shutil.move(CLAUDE_CONFIG_LEAN + '.bak', CLAUDE_CONFIG_LEAN)
+                    logger.info("Restored LEAN config")
+
         logger.info(f"Claude returned code {result.returncode}")
         if result.returncode == 0:
             return result.stdout.strip()
@@ -112,10 +148,39 @@ def run_claude(prompt: str) -> str:
             return f"Error: {error_msg}"
     except subprocess.TimeoutExpired:
         logger.error("Claude CLI timed out")
+        # Make sure to restore config on timeout
+        if use_full and os.path.exists(CLAUDE_CONFIG_LEAN + '.bak'):
+            with config_lock:
+                shutil.move(CLAUDE_CONFIG_LEAN + '.bak', CLAUDE_CONFIG_LEAN)
         return "Error: Request timed out (5 minute limit)"
     except Exception as e:
         logger.error(f"Error running Claude: {e}")
+        # Make sure to restore config on error
+        if use_full and os.path.exists(CLAUDE_CONFIG_LEAN + '.bak'):
+            with config_lock:
+                shutil.move(CLAUDE_CONFIG_LEAN + '.bak', CLAUDE_CONFIG_LEAN)
         return f"Error: {str(e)}"
+
+
+def parse_message(text: str) -> Tuple[str, bool]:
+    """Parse message for /infra prefix.
+
+    Returns:
+        Tuple of (cleaned_message, use_full_config)
+    """
+    text = text.strip()
+
+    # Check for /infra prefix
+    if text.lower().startswith('/infra '):
+        return text[7:].strip(), True
+    elif text.lower().startswith('/infra'):
+        return text[6:].strip() or "What infrastructure information do you need?", True
+
+    # Check for alternative prefixes
+    if text.lower().startswith('!full '):
+        return text[6:].strip(), True
+
+    return text, False
 
 
 def process_message(update: dict) -> None:
@@ -136,7 +201,10 @@ def process_message(update: dict) -> None:
         send_message(chat_id, "Sorry, you're not authorized to use this bot.")
         return
 
-    logger.info(f"Processing message from {username} (chat_id={chat_id}): {text[:50]}...")
+    # Parse message for /infra prefix
+    prompt, use_full = parse_message(text)
+    mode = "FULL (infra)" if use_full else "LEAN"
+    logger.info(f"Processing [{mode}] message from {username} (chat_id={chat_id}): {prompt[:50]}...")
 
     # Send typing indicator
     try:
@@ -149,17 +217,18 @@ def process_message(update: dict) -> None:
         pass
 
     start_time = time.time()
-    response = run_claude(text)
+    response = run_claude(prompt, use_full=use_full)
     elapsed = time.time() - start_time
-    
-    logger.info(f"Claude responded in {elapsed:.1f}s with {len(response)} chars")
-    RESPONSE_TIME.observe(elapsed)
+
+    logger.info(f"Claude [{mode}] responded in {elapsed:.1f}s with {len(response)} chars")
+    mode_label = "full" if use_full else "lean"
+    RESPONSE_TIME.labels(mode=mode_label).observe(elapsed)
 
     if response.startswith("Error:"):
         MESSAGES_FAILED.inc()
         send_apprise_alert("Telegram Bot Error", f"Failed: {response}", "failure")
     else:
-        MESSAGES_PROCESSED.inc()
+        MESSAGES_PROCESSED.labels(mode=mode_label).inc()
 
     success = send_message(chat_id, response)
     logger.info(f"Message sent: {success}")

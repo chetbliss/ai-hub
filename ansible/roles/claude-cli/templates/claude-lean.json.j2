@@ -1,0 +1,48 @@
+{
+  "numStartups": 1,
+  "primaryApiKey": "{{ anthropic_api_key }}",
+  "customApiKeyResponses": {
+    "approved": ["{{ anthropic_api_key.split('-', 3)[-1] }}"],
+    "rejected": []
+  },
+  "bypassPermissionsAccepted": true,
+  "bypassPermissionsModeAccepted": true,
+  "hasCompletedOnboarding": true,
+  "projects": {
+    "/home/{{ ai_hub_user }}": {
+      "allowedTools": [],
+      "mcpContextUris": [],
+      "mcpServers": {
+        "memory": {
+          "command": "node",
+          "args": ["{{ mcp_servers_path }}/mcp-memory/dist/index.js"],
+          "env": {
+            "OPENAI_API_KEY": "{{ openai_api_key }}",
+            "QDRANT_URL": "{{ qdrant_url }}",
+            "SQLITE_DB_PATH": "{{ sqlite_db_path }}"
+          }
+        }
+      },
+      "enabledMcpjsonServers": [],
+      "disabledMcpjsonServers": [],
+      "hasTrustDialogAccepted": true,
+      "bypassPermissionsAccepted": true,
+      "projectOnboardingSeenCount": 1,
+      "hasClaudeMdExternalIncludesApproved": false,
+      "hasClaudeMdExternalIncludesWarningShown": false,
+      "exampleFiles": [],
+      "reactVulnerabilityCache": {
+        "detected": false,
+        "package": null,
+        "packageName": null,
+        "version": null,
+        "packageManager": null
+      }
+    }
+  },
+  "userID": "automated-deployment",
+  "firstStartTime": "{{ ansible_date_time.iso8601 }}",
+  "hasShownOpus45Notice": {},
+  "officialMarketplaceAutoInstallAttempted": true,
+  "officialMarketplaceAutoInstalled": true
+}
