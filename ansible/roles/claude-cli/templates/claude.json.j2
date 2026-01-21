@@ -1,7 +1,7 @@
 {
   "numStartups": 1,
   "customApiKeyResponses": {
-    "approved": ["{{ anthropic_api_key.split('-')[-1] }}"],
+    "approved": ["{{ anthropic_api_key.split('-')[-2:] | join('-') }}"],
     "rejected": []
   },
   "bypassPermissionsAccepted": true,
