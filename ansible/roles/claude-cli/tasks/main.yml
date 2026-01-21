@@ -78,3 +78,47 @@
     group: "{{ ai_hub_user }}"
     mode: '0644'
     insertafter: EOF
+
+# Claude Code Web UI Setup
+- name: Install Claude Code Web UI globally
+  npm:
+    name: "claude-code-webui"
+    global: yes
+    state: latest
+  when: claude_webui_enabled | default(true)
+
+- name: Create Claude settings.json for bypass permissions
+  template:
+    src: settings.json.j2
+    dest: "/home/{{ ai_hub_user }}/.claude/settings.json"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+  when: claude_webui_enabled | default(true)
+
+- name: Create MCP servers .env file for auto-loading
+  template:
+    src: mcp-servers.env.j2
+    dest: "{{ mcp_servers_path }}/.env"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+  when: claude_webui_enabled | default(true)
+
+- name: Create Claude Code Web UI systemd service
+  template:
+    src: claude-code-webui.service.j2
+    dest: /etc/systemd/system/claude-code-webui.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: claude_webui_enabled | default(true)
+  notify: restart claude-code-webui
+
+- name: Enable and start Claude Code Web UI service
+  systemd:
+    name: claude-code-webui
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: claude_webui_enabled | default(true)

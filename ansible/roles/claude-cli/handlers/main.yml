@@ -1,0 +1,8 @@
+---
+# Handlers for claude-cli role
+
+- name: restart claude-code-webui
+  systemd:
+    name: claude-code-webui
+    state: restarted
+    daemon_reload: yes

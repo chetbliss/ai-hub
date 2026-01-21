@@ -1,0 +1,22 @@
+[Unit]
+Description=Claude Code Web UI
+Documentation=https://github.com/sugyan/claude-code-webui
+After=network.target
+
+[Service]
+Type=simple
+User={{ ai_hub_user }}
+Group={{ ai_hub_user }}
+WorkingDirectory=/home/{{ ai_hub_user }}
+ExecStart=/usr/bin/claude-code-webui --port {{ claude_webui_port }} --host {{ claude_webui_host }}
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment=HOME=/home/{{ ai_hub_user }}
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

@@ -3,3 +3,8 @@
 
 claude_cli_version: latest
 claude_config_dir: "/home/{{ ai_hub_user }}/.config/claude"
+
+# Claude Code Web UI configuration
+claude_webui_enabled: true
+claude_webui_port: 8081
+claude_webui_host: "0.0.0.0"

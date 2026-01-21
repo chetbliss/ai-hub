@@ -81,8 +81,8 @@ pipeline {
                         string(credentialsId: 'gemini-api-key', variable: 'GEMINI_API_KEY'),
                         string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY'),
                         string(credentialsId: 'proxmox-api-token', variable: 'PROXMOX_API_TOKEN'),
-                        string(credentialsId: 'unifi-controller-password', variable: 'UNIFI_PASSWORD'),
                         string(credentialsId: 'unifi-controller-username', variable: 'UNIFI_USERNAME'),
+                        string(credentialsId: 'unifi-controller-password', variable: 'UNIFI_PASSWORD'),
                         usernamePassword(credentialsId: 'github-token-chetbliss', usernameVariable: 'GITHUB_USERNAME', passwordVariable: 'GITHUB_TOKEN')
                     ]) {
                         sh """
@@ -98,8 +98,8 @@ pipeline {
                             export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}"
                             export GEMINI_API_KEY="${GEMINI_API_KEY}"
                             export OPENAI_API_KEY="${OPENAI_API_KEY}"
-                            export UNIFI_PASSWORD="${UNIFI_PASSWORD}"
                             export UNIFI_USERNAME="${UNIFI_USERNAME}"
+                            export UNIFI_PASSWORD="${UNIFI_PASSWORD}"
                             export GITHUB_USERNAME="${GITHUB_USERNAME}"
                             export GITHUB_TOKEN="${GITHUB_TOKEN}"
 
@@ -136,6 +136,10 @@ pipeline {
                         # Check SQLite database
                         echo "Checking SQLite database..."
                         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null cbliss@${targetHost} 'test -f /opt/ai-hub/data/memory.db && echo "Database exists" || echo "WARNING: Database not found"'
+
+                        # Check Claude Code Web UI
+                        echo "Checking Claude Code Web UI..."
+                        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null cbliss@${targetHost} 'curl -s http://localhost:8081/ | head -1' || echo "WARNING: Claude Code Web UI not responding"
                     """
                 }
             }
@@ -153,6 +157,7 @@ pipeline {
                 echo ""
                 echo "Services deployed:"
                 echo "  - Claude CLI"
+                echo "  - Claude Code Web UI (port 8081)"
                 echo "  - Gemini CLI"
                 echo "  - Qdrant (vector database)"
                 echo "  - SQLite (memory database)"
