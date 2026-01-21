@@ -6,3 +6,6 @@ n8n_port: 5678
 n8n_data_dir: "{{ ai_hub_base_path }}/n8n"
 n8n_container_name: n8n
 n8n_timezone: America/New_York
+
+# Telegram Bot credentials (for AI Hub chat integration)
+telegram_bot_token: "{{ lookup('env', 'TELEGRAM_BOT_TOKEN') }}"

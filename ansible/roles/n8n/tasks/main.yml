@@ -43,6 +43,45 @@
   retries: 30
   delay: 2
 
+- name: Create n8n credentials directory
+  file:
+    path: "{{ ai_hub_base_path }}/config/n8n-credentials"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0700'
+
+- name: Deploy Telegram credential file
+  template:
+    src: telegram-credential.json.j2
+    dest: "{{ ai_hub_base_path }}/config/n8n-credentials/telegram-credential.json"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+  when: telegram_bot_token | length > 0
+
+- name: Import Telegram credential into n8n
+  command: >
+    docker exec {{ n8n_container_name }} n8n import:credentials
+    --input=/home/node/.n8n/../../../opt/ai-hub/config/n8n-credentials/telegram-credential.json
+  args:
+    chdir: "{{ ai_hub_base_path }}"
+  when: telegram_bot_token | length > 0
+  ignore_errors: yes
+  register: telegram_cred_import
+
+- name: Copy credential file into container and import
+  block:
+    - name: Copy credential to container
+      command: docker cp {{ ai_hub_base_path }}/config/n8n-credentials/telegram-credential.json {{ n8n_container_name }}:/tmp/telegram-credential.json
+
+    - name: Import credential from container tmp
+      command: docker exec {{ n8n_container_name }} n8n import:credentials --input=/tmp/telegram-credential.json
+
+    - name: Cleanup credential file in container
+      command: docker exec {{ n8n_container_name }} rm /tmp/telegram-credential.json
+  when: telegram_bot_token | length > 0 and telegram_cred_import.rc != 0
+
 - name: Display n8n status
   debug:
     msg: |
@@ -51,3 +90,4 @@
         - Username: {{ ai_hub_user }}
         - Password: {{ lookup('password', '/tmp/n8n_password chars=ascii_letters,digits length=16') }}
         - Data directory: {{ n8n_data_dir }}
+        - Telegram credential: {{ 'Imported' if telegram_bot_token | length > 0 else 'Not configured (set TELEGRAM_BOT_TOKEN env var)' }}
