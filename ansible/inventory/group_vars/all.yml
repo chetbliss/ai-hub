@@ -41,7 +41,7 @@ proxmox_host: "{{ lookup('env', 'PROXMOX_HOST') | default('10.10.10.12', true) }
 proxmox_user: "{{ lookup('env', 'PROXMOX_USER') | default('terraform@pve', true) }}"
 proxmox_token_name: "{{ lookup('env', 'PROXMOX_TOKEN_NAME') | default('jenkins-token', true) }}"
 proxmox_token_value: "{{ lookup('env', 'PROXMOX_TOKEN_VALUE') }}"
-proxmox_allow_elevated: "{{ lookup('env', 'PROXMOX_ALLOW_ELEVATED') | default('false', true) }}"
+proxmox_allow_elevated: "{{ lookup('env', 'PROXMOX_ALLOW_ELEVATED') | default('true', true) }}"
 proxmox_port: "{{ lookup('env', 'PROXMOX_PORT') | default('8006', true) }}"
 
 # UniFi MCP configuration
