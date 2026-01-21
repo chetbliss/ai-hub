@@ -1,32 +1,18 @@
 ---
 # Deploy UniFi MCP server (Python-based, requires Python 3.13+)
-
-- name: Add deadsnakes PPA for Python 3.13
-  apt_repository:
-    repo: ppa:deadsnakes/ppa
-    state: present
-  become: yes
-
-- name: Install Python 3.13
-  apt:
-    name:
-      - python3.13
-      - python3.13-venv
-      - python3.13-dev
-    state: present
-    update_cache: yes
-  become: yes
+# Uses uv to manage Python version and dependencies (works on Debian/Ubuntu)
 
 - name: Check if uv is installed
-  command: which uv
+  command: /home/{{ ai_hub_user }}/.local/bin/uv --version
   register: uv_check
   ignore_errors: yes
   changed_when: false
+  become_user: "{{ ai_hub_user }}"
 
 - name: Install uv package manager
   shell: curl -LsSf https://astral.sh/uv/install.sh | sh
   args:
-    creates: "{{ ansible_env.HOME }}/.local/bin/uv"
+    creates: "/home/{{ ai_hub_user }}/.local/bin/uv"
   become_user: "{{ ai_hub_user }}"
   when: uv_check.rc != 0
 
@@ -37,6 +23,14 @@
     state: present
   become_user: "{{ ai_hub_user }}"
 
+- name: Install Python 3.13 via uv
+  command: /home/{{ ai_hub_user }}/.local/bin/uv python install 3.13
+  become_user: "{{ ai_hub_user }}"
+  environment:
+    PATH: "/home/{{ ai_hub_user }}/.local/bin:{{ ansible_env.PATH }}"
+  register: python_install
+  changed_when: "'Installed' in python_install.stdout"
+
 - name: Clone UniFi MCP server repository
   git:
     repo: "{{ mcp_unifi_repo }}"
@@ -45,8 +39,14 @@
     force: yes
   become_user: "{{ ai_hub_user }}"
 
+- name: Remove existing venv if present (for clean install)
+  file:
+    path: "{{ mcp_unifi_dir }}/.venv"
+    state: absent
+  when: mcp_unifi_force_reinstall | default(false)
+
 - name: Create virtual environment with Python 3.13
-  command: /home/{{ ai_hub_user }}/.local/bin/uv venv --python python3.13
+  command: /home/{{ ai_hub_user }}/.local/bin/uv venv --python 3.13
   args:
     chdir: "{{ mcp_unifi_dir }}"
     creates: "{{ mcp_unifi_dir }}/.venv"
@@ -54,16 +54,7 @@
   environment:
     PATH: "/home/{{ ai_hub_user }}/.local/bin:{{ ansible_env.PATH }}"
 
-- name: Install UniFi MCP package in editable mode
-  command: /home/{{ ai_hub_user }}/.local/bin/uv pip install --no-deps -e .
-  args:
-    chdir: "{{ mcp_unifi_dir }}"
-  become_user: "{{ ai_hub_user }}"
-  environment:
-    PATH: "/home/{{ ai_hub_user }}/.local/bin:{{ ansible_env.PATH }}"
-    VIRTUAL_ENV: "{{ mcp_unifi_dir }}/.venv"
-
-- name: Install UniFi MCP dependencies
+- name: Install UniFi MCP package and dependencies
   command: /home/{{ ai_hub_user }}/.local/bin/uv pip install -e .
   args:
     chdir: "{{ mcp_unifi_dir }}"
@@ -94,14 +85,16 @@
   ignore_errors: yes
   changed_when: false
   become_user: "{{ ai_hub_user }}"
+  environment:
+    PATH: "/home/{{ ai_hub_user }}/.local/bin:{{ ansible_env.PATH }}"
 
 - name: Display UniFi MCP status
   debug:
     msg: |
       UniFi MCP server deployed:
         - Location: {{ mcp_unifi_dir }}
-        - Python: 3.13 (via deadsnakes PPA)
+        - Python: 3.13 (managed by uv)
         - Virtual env: {{ mcp_unifi_dir }}/.venv
         - Command: {{ mcp_unifi_dir }}/.venv/bin/unifi-network-mcp
         - Credentials: {{ 'Configured' if (unifi_password is defined and unifi_password | length > 0) else 'Not set (UNIFI_PASSWORD required)' }}
-        - Status: {{ 'Ready' if unifi_mcp_check.rc == 0 else 'Installation issue - check logs' }}
+        - Status: {{ 'Ready' if unifi_mcp_check.rc == 0 else 'Check UniFi controller credentials' }}
