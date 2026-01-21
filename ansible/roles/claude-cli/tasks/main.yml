@@ -56,6 +56,12 @@
     path: "/home/{{ ai_hub_user }}/.claude/settings.local.json"
     state: absent
 
+- name: Remove ANTHROPIC_API_KEY export from .bashrc (causes conflict prompt)
+  lineinfile:
+    path: "/home/{{ ai_hub_user }}/.bashrc"
+    regexp: '^export ANTHROPIC_API_KEY='
+    state: absent
+
 - name: Add Claude alias to .bashrc for automatic bypass permissions
   lineinfile:
     path: "/home/{{ ai_hub_user }}/.bashrc"
