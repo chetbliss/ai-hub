@@ -62,6 +62,12 @@
     regexp: '^export ANTHROPIC_API_KEY='
     state: absent
 
+- name: Remove any old Claude aliases from .bashrc (prevents duplicates)
+  lineinfile:
+    path: "/home/{{ ai_hub_user }}/.bashrc"
+    regexp: '^alias claude='
+    state: absent
+
 - name: Add Claude alias to .bashrc for automatic bypass permissions
   lineinfile:
     path: "/home/{{ ai_hub_user }}/.bashrc"
