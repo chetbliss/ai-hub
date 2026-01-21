@@ -1,60 +1,77 @@
 ---
-# Deploy Telegram Claude Bot
+# Deploy Telegram Claude Bot (prod only)
 
-- name: Create Telegram bot directory
-  file:
-    path: "{{ telegram_bot_install_dir }}"
-    state: directory
-    owner: "{{ ai_hub_user }}"
-    group: "{{ ai_hub_user }}"
-    mode: '0755'
+- name: Deploy Telegram Claude Bot
+  when: telegram_bot_enabled | default(false)
+  block:
+    - name: Create Telegram bot directory
+      file:
+        path: "{{ telegram_bot_install_dir }}"
+        state: directory
+        owner: "{{ ai_hub_user }}"
+        group: "{{ ai_hub_user }}"
+        mode: '0755'
 
-- name: Create Python virtual environment
-  command: python3 -m venv {{ telegram_bot_venv }}
-  args:
-    creates: "{{ telegram_bot_venv }}/bin/python"
-  become_user: "{{ ai_hub_user }}"
+    - name: Create Python virtual environment
+      command: python3 -m venv {{ telegram_bot_venv }}
+      args:
+        creates: "{{ telegram_bot_venv }}/bin/python"
+      become_user: "{{ ai_hub_user }}"
 
-- name: Install Python dependencies
-  pip:
-    name:
-      - requests
-      - prometheus-client
-    virtualenv: "{{ telegram_bot_venv }}"
-    state: present
-  become_user: "{{ ai_hub_user }}"
+    - name: Install Python dependencies
+      pip:
+        name:
+          - requests
+          - prometheus-client
+        virtualenv: "{{ telegram_bot_venv }}"
+        state: present
+      become_user: "{{ ai_hub_user }}"
 
-- name: Deploy Telegram bot script
-  template:
-    src: telegram_claude_bot.py.j2
-    dest: "{{ telegram_bot_script_path }}"
-    owner: "{{ ai_hub_user }}"
-    group: "{{ ai_hub_user }}"
-    mode: '0755'
-  notify: restart telegram-claude-bot
+    - name: Deploy Telegram bot script
+      template:
+        src: telegram_claude_bot.py.j2
+        dest: "{{ telegram_bot_script_path }}"
+        owner: "{{ ai_hub_user }}"
+        group: "{{ ai_hub_user }}"
+        mode: '0755'
+      notify: restart telegram-claude-bot
 
-- name: Deploy systemd service
-  template:
-    src: telegram-claude-bot.service.j2
-    dest: /etc/systemd/system/telegram-claude-bot.service
-    owner: root
-    group: root
-    mode: '0644'
-  notify: restart telegram-claude-bot
+    - name: Deploy systemd service
+      template:
+        src: telegram-claude-bot.service.j2
+        dest: /etc/systemd/system/telegram-claude-bot.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart telegram-claude-bot
 
-- name: Enable and start Telegram bot service
-  systemd:
-    name: telegram-claude-bot
-    enabled: yes
-    state: started
-    daemon_reload: yes
+    - name: Enable and start Telegram bot service
+      systemd:
+        name: telegram-claude-bot
+        enabled: yes
+        state: started
+        daemon_reload: yes
 
-- name: Display Telegram bot status
-  debug:
-    msg: |
-      Telegram Claude Bot deployed:
-        - Script: {{ telegram_bot_script_path }}
-        - Service: systemctl status telegram-claude-bot
-        - Logs: journalctl -u telegram-claude-bot -f
-        - Metrics: http://{{ ansible_host }}:{{ telegram_metrics_port }}/metrics
-        - Allowed chat IDs: {{ telegram_allowed_chat_ids }}
+    - name: Display Telegram bot status
+      debug:
+        msg: |
+          Telegram Claude Bot deployed:
+            - Script: {{ telegram_bot_script_path }}
+            - Service: systemctl status telegram-claude-bot
+            - Logs: journalctl -u telegram-claude-bot -f
+            - Metrics: http://{{ ansible_host }}:{{ telegram_metrics_port }}/metrics
+            - Allowed chat IDs: {{ telegram_allowed_chat_ids }}
+
+- name: Disable Telegram Claude Bot (non-prod environments)
+  when: not (telegram_bot_enabled | default(false))
+  block:
+    - name: Stop and disable Telegram bot service
+      systemd:
+        name: telegram-claude-bot
+        enabled: no
+        state: stopped
+      ignore_errors: yes
+
+    - name: Display Telegram bot disabled message
+      debug:
+        msg: "Telegram Claude Bot disabled on this environment (telegram_bot_enabled=false)"

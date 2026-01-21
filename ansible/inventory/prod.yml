@@ -12,3 +12,6 @@ all:
           environment: prod
           vm_name: ai-hub
           vm_ip: 10.10.10.50
+
+          # Telegram bot - only enabled on prod
+          telegram_bot_enabled: true

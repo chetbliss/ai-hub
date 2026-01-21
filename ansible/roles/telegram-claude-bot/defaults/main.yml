@@ -1,6 +1,9 @@
 ---
 # Telegram Claude Bot configuration
 
+# Only enable on production (prevents multiple bots polling same token)
+telegram_bot_enabled: false
+
 # Telegram settings
 telegram_bot_token: "{{ lookup('env', 'TELEGRAM_BOT_TOKEN') }}"
 telegram_allowed_chat_ids:
