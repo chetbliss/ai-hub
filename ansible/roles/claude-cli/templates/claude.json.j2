@@ -33,7 +33,19 @@
             "PROXMOX_ALLOW_ELEVATED": "{{ proxmox_allow_elevated }}",
             "PROXMOX_PORT": "{{ proxmox_port }}"
           }
-        }
+        }{% if unifi_password is defined and unifi_password | length > 0 %},
+        "unifi": {
+          "command": "{{ mcp_servers_path }}/unifi-network-mcp/.venv/bin/unifi-network-mcp",
+          "args": [],
+          "env": {
+            "UNIFI_HOST": "{{ unifi_host }}",
+            "UNIFI_USERNAME": "{{ unifi_username }}",
+            "UNIFI_PASSWORD": "{{ unifi_password }}",
+            "UNIFI_PORT": "{{ unifi_port }}",
+            "UNIFI_SITE": "{{ unifi_site }}",
+            "UNIFI_VERIFY_SSL": "{{ unifi_verify_ssl }}"
+          }
+        }{% endif %}
       },
       "enabledMcpjsonServers": [],
       "disabledMcpjsonServers": [],

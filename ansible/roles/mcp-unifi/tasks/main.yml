@@ -1,5 +1,41 @@
 ---
-# Deploy UniFi MCP server (Python/Docker-based)
+# Deploy UniFi MCP server (Python-based, requires Python 3.13+)
+
+- name: Add deadsnakes PPA for Python 3.13
+  apt_repository:
+    repo: ppa:deadsnakes/ppa
+    state: present
+  become: yes
+
+- name: Install Python 3.13
+  apt:
+    name:
+      - python3.13
+      - python3.13-venv
+      - python3.13-dev
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: Check if uv is installed
+  command: which uv
+  register: uv_check
+  ignore_errors: yes
+  changed_when: false
+
+- name: Install uv package manager
+  shell: curl -LsSf https://astral.sh/uv/install.sh | sh
+  args:
+    creates: "{{ ansible_env.HOME }}/.local/bin/uv"
+  become_user: "{{ ai_hub_user }}"
+  when: uv_check.rc != 0
+
+- name: Add uv to PATH in bashrc
+  lineinfile:
+    path: "/home/{{ ai_hub_user }}/.bashrc"
+    line: 'export PATH="$HOME/.local/bin:$PATH"'
+    state: present
+  become_user: "{{ ai_hub_user }}"
 
 - name: Clone UniFi MCP server repository
   git:
@@ -9,22 +45,37 @@
     force: yes
   become_user: "{{ ai_hub_user }}"
 
-- name: Check if requirements.txt exists
-  stat:
-    path: "{{ mcp_unifi_dir }}/requirements.txt"
-  register: requirements_txt
+- name: Create virtual environment with Python 3.13
+  command: /home/{{ ai_hub_user }}/.local/bin/uv venv --python python3.13
+  args:
+    chdir: "{{ mcp_unifi_dir }}"
+    creates: "{{ mcp_unifi_dir }}/.venv"
+  become_user: "{{ ai_hub_user }}"
+  environment:
+    PATH: "/home/{{ ai_hub_user }}/.local/bin:{{ ansible_env.PATH }}"
 
-- name: Install Python dependencies for UniFi MCP
-  pip:
-    requirements: "{{ mcp_unifi_dir }}/requirements.txt"
-    state: present
-    executable: pip3
-  when: requirements_txt.stat.exists
+- name: Install UniFi MCP package in editable mode
+  command: /home/{{ ai_hub_user }}/.local/bin/uv pip install --no-deps -e .
+  args:
+    chdir: "{{ mcp_unifi_dir }}"
+  become_user: "{{ ai_hub_user }}"
+  environment:
+    PATH: "/home/{{ ai_hub_user }}/.local/bin:{{ ansible_env.PATH }}"
+    VIRTUAL_ENV: "{{ mcp_unifi_dir }}/.venv"
+
+- name: Install UniFi MCP dependencies
+  command: /home/{{ ai_hub_user }}/.local/bin/uv pip install -e .
+  args:
+    chdir: "{{ mcp_unifi_dir }}"
+  become_user: "{{ ai_hub_user }}"
+  environment:
+    PATH: "/home/{{ ai_hub_user }}/.local/bin:{{ ansible_env.PATH }}"
+    VIRTUAL_ENV: "{{ mcp_unifi_dir }}/.venv"
 
 - name: Create UniFi MCP environment file
   template:
     src: .env.unifi.j2
-    dest: "{{ mcp_servers_path }}/.env.unifi"
+    dest: "{{ mcp_unifi_dir }}/.env"
     owner: "{{ ai_hub_user }}"
     group: "{{ ai_hub_user }}"
     mode: '0600'
@@ -37,12 +88,20 @@
     group: "{{ ai_hub_user }}"
     recurse: yes
 
+- name: Verify unifi-network-mcp command exists
+  command: "{{ mcp_unifi_dir }}/.venv/bin/unifi-network-mcp --help"
+  register: unifi_mcp_check
+  ignore_errors: yes
+  changed_when: false
+  become_user: "{{ ai_hub_user }}"
+
 - name: Display UniFi MCP status
   debug:
     msg: |
-      UniFi MCP server configured:
+      UniFi MCP server deployed:
         - Location: {{ mcp_unifi_dir }}
-        - Repository: {{ mcp_unifi_repo }}
-        - Configuration: {{ 'Ready' if (unifi_password is defined and unifi_password | length > 0) else 'Needs credentials (MFA issue - see docs)' }}
-        - Note: This is a Python/Docker-based MCP server
-        - To test: cd {{ mcp_unifi_dir }} && python3 server.py
+        - Python: 3.13 (via deadsnakes PPA)
+        - Virtual env: {{ mcp_unifi_dir }}/.venv
+        - Command: {{ mcp_unifi_dir }}/.venv/bin/unifi-network-mcp
+        - Credentials: {{ 'Configured' if (unifi_password is defined and unifi_password | length > 0) else 'Not set (UNIFI_PASSWORD required)' }}
+        - Status: {{ 'Ready' if unifi_mcp_check.rc == 0 else 'Installation issue - check logs' }}
