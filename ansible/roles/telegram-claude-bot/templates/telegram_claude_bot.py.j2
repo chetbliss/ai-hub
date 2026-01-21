@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
 """
 Telegram Claude Bot - Polls Telegram for messages and responds via Claude CLI.
-
-Features:
-- Long polling (no webhook needed, works on internal networks)
-- Chat ID whitelist for security
-- Prometheus metrics endpoint
-- Apprise alerts on errors
-- Graceful shutdown
 """
 
 import os
@@ -17,14 +10,11 @@ import signal
 import subprocess
 import logging
 import threading
-from datetime import datetime
-from typing import Optional, Set
+from typing import Set
 import requests
 
-# Prometheus metrics
 from prometheus_client import start_http_server, Counter, Histogram, Gauge
 
-# Configuration from environment
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '{{ telegram_bot_token }}')
 ALLOWED_CHAT_IDS: Set[int] = { {{ telegram_allowed_chat_ids | join(', ') }} }
 POLL_TIMEOUT = int(os.environ.get('POLL_TIMEOUT', '{{ telegram_poll_timeout }}'))
@@ -32,7 +22,6 @@ METRICS_PORT = int(os.environ.get('METRICS_PORT', '{{ telegram_metrics_port }}')
 APPRISE_URL = os.environ.get('APPRISE_URL', '{{ apprise_url }}')
 CLAUDE_COMMAND = os.environ.get('CLAUDE_COMMAND', '{{ claude_command }}')
 
-# Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -40,41 +29,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Prometheus metrics
 MESSAGES_RECEIVED = Counter('telegram_messages_received_total', 'Total messages received', ['chat_id', 'authorized'])
 MESSAGES_PROCESSED = Counter('telegram_messages_processed_total', 'Total messages processed successfully')
 MESSAGES_FAILED = Counter('telegram_messages_failed_total', 'Total messages that failed processing')
-RESPONSE_TIME = Histogram('telegram_response_seconds', 'Time to process and respond to messages', buckets=[1, 5, 10, 30, 60, 120, 300])
+RESPONSE_TIME = Histogram('telegram_response_seconds', 'Time to process and respond', buckets=[1, 5, 10, 30, 60, 120, 300])
 LAST_POLL_TIME = Gauge('telegram_last_poll_timestamp', 'Timestamp of last successful poll')
-BOT_UP = Gauge('telegram_bot_up', 'Bot is running (1) or not (0)')
+BOT_UP = Gauge('telegram_bot_up', 'Bot is running')
 
-# Global state
 running = True
 last_update_id = 0
 
 
 def send_apprise_alert(title: str, message: str, priority: str = 'warning'):
-    """Send alert via Apprise."""
     if not APPRISE_URL:
         return
     try:
-        requests.post(
-            APPRISE_URL,
-            json={'title': title, 'body': message, 'type': priority},
-            timeout=10
-        )
+        requests.post(APPRISE_URL, json={'title': title, 'body': message, 'type': priority}, timeout=10)
     except Exception as e:
         logger.error(f"Failed to send Apprise alert: {e}")
 
 
 def get_updates(offset: int = 0) -> list:
-    """Poll Telegram for new updates using long polling."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
-    params = {
-        'offset': offset,
-        'timeout': POLL_TIMEOUT,
-        'allowed_updates': ['message']
-    }
+    params = {'offset': offset, 'timeout': POLL_TIMEOUT, 'allowed_updates': ['message']}
     try:
         response = requests.get(url, params=params, timeout=POLL_TIMEOUT + 10)
         response.raise_for_status()
@@ -82,11 +59,8 @@ def get_updates(offset: int = 0) -> list:
         if data.get('ok'):
             LAST_POLL_TIME.set(time.time())
             return data.get('result', [])
-        else:
-            logger.error(f"Telegram API error: {data}")
-            return []
+        return []
     except requests.exceptions.Timeout:
-        # Normal for long polling
         LAST_POLL_TIME.set(time.time())
         return []
     except Exception as e:
@@ -95,28 +69,22 @@ def get_updates(offset: int = 0) -> list:
         return []
 
 
-def send_message(chat_id: int, text: str, parse_mode: str = 'Markdown') -> bool:
-    """Send a message to Telegram."""
+def send_message(chat_id: int, text: str, parse_mode: str = None) -> bool:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
-    # Telegram has a 4096 char limit, truncate if needed
     if len(text) > 4000:
         text = text[:4000] + "\n\n... (truncated)"
-
-    data = {
-        'chat_id': chat_id,
-        'text': text,
-        'parse_mode': parse_mode
-    }
+    data = {'chat_id': chat_id, 'text': text}
+    if parse_mode:
+        data['parse_mode'] = parse_mode
     try:
         response = requests.post(url, json=data, timeout=30)
         response.raise_for_status()
         return True
     except Exception as e:
         logger.error(f"Error sending message: {e}")
-        # Try without parse_mode in case markdown is invalid
+        # Retry without parse_mode
         try:
-            data.pop('parse_mode')
+            data.pop('parse_mode', None)
             response = requests.post(url, json=data, timeout=30)
             return response.ok
         except:
@@ -124,22 +92,26 @@ def send_message(chat_id: int, text: str, parse_mode: str = 'Markdown') -> bool:
 
 
 def run_claude(prompt: str) -> str:
-    """Run Claude CLI with the given prompt."""
+    """Run Claude CLI with the given prompt via stdin."""
     try:
         result = subprocess.run(
-            [CLAUDE_COMMAND, '--print', '-p', prompt],
+            [CLAUDE_COMMAND, '--print'],
+            input=prompt,
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minute timeout
-            cwd=os.path.expanduser('~')
+            timeout=300,
+            cwd=os.path.expanduser('~'),
+            env={**os.environ, 'HOME': os.path.expanduser('~')}
         )
+        logger.info(f"Claude returned code {result.returncode}")
         if result.returncode == 0:
             return result.stdout.strip()
         else:
-            error_msg = result.stderr.strip() or "Unknown error"
-            logger.error(f"Claude CLI error: {error_msg}")
+            error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+            logger.error(f"Claude CLI error (rc={result.returncode}): {error_msg}")
             return f"Error: {error_msg}"
     except subprocess.TimeoutExpired:
+        logger.error("Claude CLI timed out")
         return "Error: Request timed out (5 minute limit)"
     except Exception as e:
         logger.error(f"Error running Claude: {e}")
@@ -147,7 +119,6 @@ def run_claude(prompt: str) -> str:
 
 
 def process_message(update: dict) -> None:
-    """Process a single Telegram message."""
     message = update.get('message', {})
     chat_id = message.get('chat', {}).get('id')
     text = message.get('text', '')
@@ -157,7 +128,6 @@ def process_message(update: dict) -> None:
     if not chat_id or not text:
         return
 
-    # Check authorization
     authorized = chat_id in ALLOWED_CHAT_IDS or not ALLOWED_CHAT_IDS
     MESSAGES_RECEIVED.labels(chat_id=str(chat_id), authorized=str(authorized)).inc()
 
@@ -178,31 +148,24 @@ def process_message(update: dict) -> None:
     except:
         pass
 
-    # Process with Claude
     start_time = time.time()
     response = run_claude(text)
     elapsed = time.time() - start_time
-
+    
+    logger.info(f"Claude responded in {elapsed:.1f}s with {len(response)} chars")
     RESPONSE_TIME.observe(elapsed)
 
     if response.startswith("Error:"):
         MESSAGES_FAILED.inc()
-        send_apprise_alert(
-            "Telegram Bot Error",
-            f"Failed to process message from {username}: {response}",
-            "failure"
-        )
+        send_apprise_alert("Telegram Bot Error", f"Failed: {response}", "failure")
     else:
         MESSAGES_PROCESSED.inc()
 
-    # Send response
     success = send_message(chat_id, response)
-    if not success:
-        logger.error(f"Failed to send response to chat_id={chat_id}")
+    logger.info(f"Message sent: {success}")
 
 
 def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully."""
     global running
     logger.info(f"Received signal {signum}, shutting down...")
     running = False
@@ -212,46 +175,38 @@ def signal_handler(signum, frame):
 def main():
     global running, last_update_id
 
-    # Setup signal handlers
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    # Start Prometheus metrics server
     logger.info(f"Starting Prometheus metrics server on port {METRICS_PORT}")
     start_http_server(METRICS_PORT)
 
     BOT_UP.set(1)
 
-    # Send startup notification
     logger.info("Telegram Claude Bot starting...")
-    logger.info(f"Allowed chat IDs: {ALLOWED_CHAT_IDS or 'ALL (no whitelist)'}")
-    send_apprise_alert("Telegram Bot Started", "Telegram Claude Bot is now running.", "info")
+    logger.info(f"Allowed chat IDs: {ALLOWED_CHAT_IDS or 'ALL'}")
+    send_apprise_alert("Telegram Bot Started", "Bot is now running.", "info")
 
-    # Clear any pending updates on startup
+    # Clear pending updates
     updates = get_updates(offset=-1)
     if updates:
         last_update_id = updates[-1]['update_id']
         logger.info(f"Cleared {len(updates)} pending updates")
 
-    # Main polling loop
     while running:
         try:
             updates = get_updates(offset=last_update_id + 1)
-
             for update in updates:
                 last_update_id = update['update_id']
-
-                # Process in a thread to not block polling
                 thread = threading.Thread(target=process_message, args=(update,))
                 thread.start()
-
         except Exception as e:
             logger.error(f"Error in main loop: {e}")
             MESSAGES_FAILED.inc()
-            time.sleep(5)  # Back off on errors
+            time.sleep(5)
 
     logger.info("Bot stopped")
-    send_apprise_alert("Telegram Bot Stopped", "Telegram Claude Bot has stopped.", "warning")
+    send_apprise_alert("Telegram Bot Stopped", "Bot has stopped.", "warning")
 
 
 if __name__ == '__main__':
