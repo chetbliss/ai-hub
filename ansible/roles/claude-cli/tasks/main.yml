@@ -70,7 +70,7 @@
 - name: Add Claude alias to .bashrc for automatic bypass permissions
   lineinfile:
     path: "/home/{{ ai_hub_user }}/.bashrc"
-    line: 'alias claude="claude --permission-mode bypassPermissions"'
+    line: 'alias claude="claude --dangerously-skip-permissions"'
     state: present
     create: yes
     owner: "{{ ai_hub_user }}"
