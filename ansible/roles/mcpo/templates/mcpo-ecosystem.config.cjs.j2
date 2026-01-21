@@ -2,12 +2,10 @@ module.exports = {
   apps: [{
     name: '{{ mcpo_service_name }}',
     script: '{{ ai_hub_base_path }}/venvs/mcpo/bin/mcpo',
-    args: '--port {{ mcpo_port }} --api-key {{ mcpo_api_key }} -- node {{ mcp_memory_server_path }}',
+    interpreter: 'none',  // Use script's shebang (Python), not Node.js
+    args: '--port {{ mcpo_port }} --api-key {{ mcpo_api_key }} -e OPENAI_API_KEY={{ openai_api_key }} -e QDRANT_URL=http://localhost:6333 -e SQLITE_DB_PATH={{ ai_hub_base_path }}/data/memory.db -- node {{ mcp_memory_server_path }}',
     cwd: '{{ ai_hub_base_path }}',
     env: {
-      OPENAI_API_KEY: '{{ openai_api_key }}',
-      QDRANT_URL: 'http://localhost:6333',
-      SQLITE_DB: '{{ ai_hub_base_path }}/data/memory.db',
       NODE_ENV: 'production'
     },
     instances: 1,
