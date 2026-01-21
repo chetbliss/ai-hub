@@ -1,4 +1,7 @@
 ---
 # Default variables for document-ingestion role
 
+# Only enable on production (saves OpenAI API costs, faster deploys)
+document_ingestion_enabled: false
+
 ingestion_script_dir: "{{ ai_hub_base_path }}/scripts"

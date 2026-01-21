@@ -1,72 +1,108 @@
 ---
-# Clone and ingest homelab documentation
+# Clone and ingest homelab documentation (prod only)
 
-- name: Build authenticated Git URL
-  set_fact:
-    docs_repo_url_auth: "{% if github_username and github_token %}https://{{ github_username }}:{{ github_token }}@github.com/chetbliss/ChetTV-Lab.git{% else %}{{ docs_repo_url }}{% endif %}"
+- name: Deploy Document Ingestion
+  when: document_ingestion_enabled | default(false)
+  block:
+    - name: Build authenticated Git URL
+      set_fact:
+        docs_repo_url_auth: "{% if github_username and github_token %}https://{{ github_username }}:{{ github_token }}@github.com/chetbliss/ChetTV-Lab.git{% else %}{{ docs_repo_url }}{% endif %}"
 
-- name: Clone homelab-migration repository
-  git:
-    repo: "{{ docs_repo_url_auth }}"
-    dest: "{{ docs_repo_path }}"
-    version: main
-    force: yes
-  become_user: "{{ ai_hub_user }}"
-  ignore_errors: yes
-  register: git_clone_result
+    - name: Clone homelab-migration repository
+      git:
+        repo: "{{ docs_repo_url_auth }}"
+        dest: "{{ docs_repo_path }}"
+        version: main
+        force: yes
+      become_user: "{{ ai_hub_user }}"
+      ignore_errors: yes
+      register: git_clone_result
 
-- name: Create scripts directory
-  file:
-    path: "{{ ingestion_script_dir }}"
-    state: directory
-    owner: "{{ ai_hub_user }}"
-    group: "{{ ai_hub_user }}"
-    mode: '0755'
+    - name: Create scripts directory
+      file:
+        path: "{{ ingestion_script_dir }}"
+        state: directory
+        owner: "{{ ai_hub_user }}"
+        group: "{{ ai_hub_user }}"
+        mode: '0755'
 
-- name: Copy ingestion script
-  template:
-    src: ingest_docs.py.j2
-    dest: "{{ ingestion_script_dir }}/ingest_docs.py"
-    owner: "{{ ai_hub_user }}"
-    group: "{{ ai_hub_user }}"
-    mode: '0755'
+    - name: Copy ingestion script
+      template:
+        src: ingest_docs.py.j2
+        dest: "{{ ingestion_script_dir }}/ingest_docs.py"
+        owner: "{{ ai_hub_user }}"
+        group: "{{ ai_hub_user }}"
+        mode: '0755'
 
-- name: Create virtual environment for document ingestion
-  command: python3 -m venv {{ ai_hub_base_path }}/venvs/doc-ingestion
-  args:
-    creates: "{{ ai_hub_base_path }}/venvs/doc-ingestion/bin/python3"
-  become_user: "{{ ai_hub_user }}"
-  when: git_clone_result is succeeded
+    - name: Create virtual environment for document ingestion
+      command: python3 -m venv {{ ai_hub_base_path }}/venvs/doc-ingestion
+      args:
+        creates: "{{ ai_hub_base_path }}/venvs/doc-ingestion/bin/python3"
+      become_user: "{{ ai_hub_user }}"
+      when: git_clone_result is succeeded
 
-- name: Install Python dependencies for ingestion in venv
-  pip:
-    name:
-      - qdrant-client
-      - openai
-      - tiktoken
-    state: present
-    virtualenv: "{{ ai_hub_base_path }}/venvs/doc-ingestion"
-  become_user: "{{ ai_hub_user }}"
-  when: git_clone_result is succeeded
+    - name: Install Python dependencies for ingestion in venv
+      pip:
+        name:
+          - qdrant-client
+          - openai
+          - tiktoken
+        state: present
+        virtualenv: "{{ ai_hub_base_path }}/venvs/doc-ingestion"
+      become_user: "{{ ai_hub_user }}"
+      when: git_clone_result is succeeded
 
-- name: Run initial document ingestion
-  command: "{{ ai_hub_base_path }}/venvs/doc-ingestion/bin/python3 {{ ingestion_script_dir }}/ingest_docs.py"
-  args:
-    chdir: "{{ ingestion_script_dir }}"
-  become_user: "{{ ai_hub_user }}"
-  environment:
-    OPENAI_API_KEY: "{{ openai_api_key }}"
-    QDRANT_URL: "{{ qdrant_url }}"
-    QDRANT_COLLECTION: "{{ qdrant_collection }}"
-    DOCS_PATH: "{{ docs_repo_path }}"
-  register: ingestion_result
-  ignore_errors: yes
-  when: git_clone_result is succeeded
+    - name: Run initial document ingestion
+      command: "{{ ai_hub_base_path }}/venvs/doc-ingestion/bin/python3 {{ ingestion_script_dir }}/ingest_docs.py"
+      args:
+        chdir: "{{ ingestion_script_dir }}"
+      become_user: "{{ ai_hub_user }}"
+      environment:
+        OPENAI_API_KEY: "{{ openai_api_key }}"
+        QDRANT_URL: "{{ qdrant_url }}"
+        QDRANT_COLLECTION: "{{ qdrant_collection }}"
+        DOCS_PATH: "{{ docs_repo_path }}"
+      register: ingestion_result
+      ignore_errors: yes
+      when: git_clone_result is succeeded
 
-- name: Display ingestion status
-  debug:
-    msg: |
-      Document ingestion status:
-        - Repository clone: {{ 'Success' if git_clone_result is succeeded else 'Failed - check credentials' }}
-        - Ingestion: {{ 'Success' if ingestion_result.rc is defined and ingestion_result.rc == 0 else 'Skipped or Warning' }}
-        - Collection: {{ qdrant_collection }}
+    - name: Deploy systemd service for document ingestion
+      template:
+        src: doc-ingestion.service.j2
+        dest: /etc/systemd/system/doc-ingestion.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Deploy systemd timer for daily ingestion
+      template:
+        src: doc-ingestion.timer.j2
+        dest: /etc/systemd/system/doc-ingestion.timer
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Enable and start document ingestion timer
+      systemd:
+        name: doc-ingestion.timer
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Display ingestion status
+      debug:
+        msg: |
+          Document ingestion configured:
+            - Repository clone: {{ 'Success' if git_clone_result is succeeded else 'Failed - check credentials' }}
+            - Initial ingestion: {{ 'Success' if ingestion_result.rc is defined and ingestion_result.rc == 0 else 'Skipped or Warning' }}
+            - Daily timer: Enabled (runs at 4 AM)
+            - Manual run: sudo systemctl start doc-ingestion.service
+            - Logs: journalctl -u doc-ingestion
+            - Collection: {{ qdrant_collection }}
+
+- name: Skip Document Ingestion (non-prod environments)
+  when: not (document_ingestion_enabled | default(false))
+  block:
+    - name: Display skip message
+      debug:
+        msg: "Document ingestion disabled on this environment (document_ingestion_enabled=false). Faster deploys, no OpenAI costs."

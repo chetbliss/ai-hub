@@ -1,0 +1,26 @@
+[Unit]
+Description=AI Hub Document Ingestion (Incremental)
+Documentation=https://github.com/chetbliss/ai-hub
+After=network.target qdrant.service
+
+[Service]
+Type=oneshot
+User={{ ai_hub_user }}
+Group={{ ai_hub_user }}
+WorkingDirectory={{ ingestion_script_dir }}
+ExecStart={{ ai_hub_base_path }}/venvs/doc-ingestion/bin/python3 {{ ingestion_script_dir }}/ingest_docs.py
+
+# Environment
+Environment=HOME=/home/{{ ai_hub_user }}
+Environment=OPENAI_API_KEY={{ openai_api_key }}
+Environment=QDRANT_URL={{ qdrant_url }}
+Environment=QDRANT_COLLECTION={{ qdrant_collection }}
+Environment=DOCS_PATH={{ docs_repo_path }}
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=doc-ingestion
+
+[Install]
+WantedBy=multi-user.target

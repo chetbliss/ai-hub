@@ -15,3 +15,6 @@ all:
 
           # Telegram bot - only enabled on prod
           telegram_bot_enabled: true
+
+          # Document ingestion - only on prod (saves OpenAI costs, daily sync)
+          document_ingestion_enabled: true
