@@ -1,10 +1,11 @@
 {
   "numStartups": 1,
   "customApiKeyResponses": {
-    "approved": [],
+    "approved": ["{{ anthropic_api_key.split('-')[-1] }}"],
     "rejected": []
   },
   "bypassPermissionsAccepted": true,
+  "bypassPermissionsModeAccepted": true,
   "hasCompletedOnboarding": true,
   "projects": {
     "/home/{{ ai_hub_user }}": {
