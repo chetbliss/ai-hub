@@ -149,8 +149,8 @@ const TOOLS: Tool[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search query (e.g., "how did we setup proxmox exporter", "where is pihole running")' },
-        limit: { type: 'number', description: 'Maximum number of results to return', default: 5 },
-        score_threshold: { type: 'number', description: 'Minimum similarity score (0-1)', default: 0.7 }
+        limit: { type: 'number', description: 'Maximum number of results to return', default: 10 },
+        score_threshold: { type: 'number', description: 'Minimum similarity score (0-1)', default: 0.35 }
       },
       required: ['query']
     }
@@ -612,8 +612,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // ====================================================================
 
       case 'search_knowledge': {
-        const limit = args.limit || 5;
-        const scoreThreshold = args.score_threshold || 0.7;
+        const limit = args.limit || 10;
+        const scoreThreshold = args.score_threshold || 0.35;
 
         // Generate embedding for search query
         const queryEmbedding = await generateEmbedding(args.query as string);
