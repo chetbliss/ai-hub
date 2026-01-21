@@ -1,0 +1,14 @@
+---
+all:
+  children:
+    ai_hub:
+      hosts:
+        ai-hub-test:
+          ansible_host: 10.10.10.55
+          ansible_user: cbliss
+          ansible_python_interpreter: /usr/bin/python3
+
+          # Environment-specific variables
+          environment: test
+          vm_name: ai-hub-test
+          vm_ip: 10.10.10.55
