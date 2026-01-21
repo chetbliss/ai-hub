@@ -24,6 +24,8 @@
       - "{{ n8n_port }}:5678"
     volumes:
       - "{{ n8n_data_dir }}:/home/node/.n8n"
+    etc_hosts:
+      host.docker.internal: host-gateway
     env:
       GENERIC_TIMEZONE: "{{ n8n_timezone }}"
       TZ: "{{ n8n_timezone }}"
@@ -82,6 +84,58 @@
       command: docker exec {{ n8n_container_name }} rm /tmp/telegram-credential.json
   when: telegram_bot_token | length > 0 and telegram_cred_import.rc != 0
 
+# SSH Credential for Claude CLI access
+- name: Deploy SSH credential file
+  template:
+    src: ssh-credential.json.j2
+    dest: "{{ ai_hub_base_path }}/config/n8n-credentials/ssh-credential.json"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0600'
+  when: ai_hub_ssh_password | length > 0
+
+- name: Import SSH credential into n8n
+  block:
+    - name: Copy SSH credential to container
+      command: docker cp {{ ai_hub_base_path }}/config/n8n-credentials/ssh-credential.json {{ n8n_container_name }}:/tmp/ssh-credential.json
+
+    - name: Import SSH credential
+      command: docker exec {{ n8n_container_name }} n8n import:credentials --input=/tmp/ssh-credential.json
+
+    - name: Cleanup SSH credential file in container
+      command: docker exec {{ n8n_container_name }} rm /tmp/ssh-credential.json
+  when: ai_hub_ssh_password | length > 0
+
+# Telegram Claude Bot Workflow
+- name: Create n8n workflows directory
+  file:
+    path: "{{ ai_hub_base_path }}/config/n8n-workflows"
+    state: directory
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0755'
+
+- name: Deploy Telegram Claude workflow file
+  template:
+    src: telegram-claude-workflow.json.j2
+    dest: "{{ ai_hub_base_path }}/config/n8n-workflows/telegram-claude-workflow.json"
+    owner: "{{ ai_hub_user }}"
+    group: "{{ ai_hub_user }}"
+    mode: '0644'
+  when: telegram_workflow_enabled | default(true) and telegram_bot_token | length > 0 and ai_hub_ssh_password | length > 0
+
+- name: Import Telegram Claude workflow into n8n
+  block:
+    - name: Copy workflow to container
+      command: docker cp {{ ai_hub_base_path }}/config/n8n-workflows/telegram-claude-workflow.json {{ n8n_container_name }}:/tmp/telegram-claude-workflow.json
+
+    - name: Import workflow
+      command: docker exec {{ n8n_container_name }} n8n import:workflow --input=/tmp/telegram-claude-workflow.json
+
+    - name: Cleanup workflow file in container
+      command: docker exec {{ n8n_container_name }} rm /tmp/telegram-claude-workflow.json
+  when: telegram_workflow_enabled | default(true) and telegram_bot_token | length > 0 and ai_hub_ssh_password | length > 0
+
 - name: Display n8n status
   debug:
     msg: |
@@ -91,3 +145,5 @@
         - Password: {{ lookup('password', '/tmp/n8n_password chars=ascii_letters,digits length=16') }}
         - Data directory: {{ n8n_data_dir }}
         - Telegram credential: {{ 'Imported' if telegram_bot_token | length > 0 else 'Not configured (set TELEGRAM_BOT_TOKEN env var)' }}
+        - SSH credential: {{ 'Imported' if ai_hub_ssh_password | length > 0 else 'Not configured (set AI_HUB_SSH_PASSWORD env var)' }}
+        - Telegram Claude workflow: {{ 'Imported and active' if telegram_workflow_enabled | default(true) and telegram_bot_token | length > 0 and ai_hub_ssh_password | length > 0 else 'Not deployed' }}

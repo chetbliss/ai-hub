@@ -83,6 +83,8 @@ pipeline {
                         string(credentialsId: 'proxmox-api-token', variable: 'PROXMOX_API_TOKEN'),
                         string(credentialsId: 'unifi-controller-username', variable: 'UNIFI_USERNAME'),
                         string(credentialsId: 'unifi-controller-password', variable: 'UNIFI_PASSWORD'),
+                        string(credentialsId: 'telegram-bot-token', variable: 'TELEGRAM_BOT_TOKEN'),
+                        string(credentialsId: 'ai-hub-ssh-password', variable: 'AI_HUB_SSH_PASSWORD'),
                         usernamePassword(credentialsId: 'github-token-chetbliss', usernameVariable: 'GITHUB_USERNAME', passwordVariable: 'GITHUB_TOKEN')
                     ]) {
                         sh """
@@ -102,6 +104,8 @@ pipeline {
                             export UNIFI_PASSWORD="${UNIFI_PASSWORD}"
                             export GITHUB_USERNAME="${GITHUB_USERNAME}"
                             export GITHUB_TOKEN="${GITHUB_TOKEN}"
+                            export TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN}"
+                            export AI_HUB_SSH_PASSWORD="${AI_HUB_SSH_PASSWORD}"
 
                             # Use Jenkins SSH key for Ansible
                             ansible-playbook -i inventory/${env.AI_HUB_INVENTORY} \
@@ -162,6 +166,7 @@ pipeline {
                 echo "  - Qdrant (vector database)"
                 echo "  - SQLite (memory database)"
                 echo "  - n8n (workflow automation)"
+                echo "  - Telegram Claude Bot workflow"
                 echo "  - MCP Memory Server"
                 echo "  - MCP Proxmox Server"
                 echo "  - MCP UniFi Server"
